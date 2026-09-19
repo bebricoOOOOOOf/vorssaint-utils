@@ -26,6 +26,22 @@ final class CleaningModeManager: ObservableObject {
     private static let systemDefinedEventType = CGEventType(rawValue: CleaningSystemKeyEvent.systemDefinedEventTypeRawValue)!
     private static let gestureEventType = CGEventType(rawValue: UInt32(NSEvent.EventType.gesture.rawValue))!
     private static let escapeKeyCode: Int64 = 53
+    private static let eventMask: CGEventMask = [
+        CGEventType.keyDown,
+        .keyUp,
+        .flagsChanged,
+        .scrollWheel,
+        .leftMouseDown,
+        .leftMouseUp,
+        .rightMouseDown,
+        .rightMouseUp,
+        .otherMouseDown,
+        .otherMouseUp,
+        systemDefinedEventType,
+        gestureEventType,
+    ].reduce(CGEventMask(0)) { mask, type in
+        mask | (CGEventMask(1) << type.rawValue)
+    }
 
     @Published private(set) var isActive = false
     /// Consecutive Escape presses so far (0...unlockThreshold). The
@@ -167,18 +183,7 @@ final class CleaningModeManager: ObservableObject {
     // MARK: - Event tap
 
     private func installTap() -> Bool {
-        let mask = (1 << CGEventType.keyDown.rawValue)
-            | (1 << CGEventType.keyUp.rawValue)
-            | (1 << CGEventType.flagsChanged.rawValue)
-            | (1 << CGEventType.scrollWheel.rawValue)
-            | (1 << CGEventType.leftMouseDown.rawValue)
-            | (1 << CGEventType.leftMouseUp.rawValue)
-            | (1 << CGEventType.rightMouseDown.rawValue)
-            | (1 << CGEventType.rightMouseUp.rawValue)
-            | (1 << CGEventType.otherMouseDown.rawValue)
-            | (1 << CGEventType.otherMouseUp.rawValue)
-            | (1 << Self.systemDefinedEventType.rawValue)
-            | (1 << Self.gestureEventType.rawValue)
+        let mask = Self.eventMask
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
             place: .headInsertEventTap,
