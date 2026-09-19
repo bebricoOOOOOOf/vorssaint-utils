@@ -78,6 +78,48 @@ struct MetricsTests {
     private static func coreChecks(_ suite: TestSuite) {
         ScreenshotWatermarkTests.run(suite)
         MixerNativeDragTests.run(suite)
+
+        // Cleaning Mode must never repair mouse state by posting a fake release.
+        // It waits only for releases corresponding to downs it observed itself.
+        var cleaningMouseGate = CleaningMouseReleaseGate()
+        cleaningMouseGate.buttonDown(0)
+        expect(!cleaningMouseGate.requestDeactivation(),
+               "cleaning teardown waits when the primary button went down while the overlay was active")
+        expect(!cleaningMouseGate.buttonUp(1),
+               "an unrelated release cannot complete a pending cleaning teardown")
+        expect(cleaningMouseGate.buttonUp(0),
+               "the matching physical release completes the pending cleaning teardown")
+        expect(cleaningMouseGate.requestDeactivation(),
+               "cleaning teardown is immediate when no tracked button is held")
+
+        cleaningMouseGate.buttonDown(0)
+        cleaningMouseGate.buttonDown(2)
+        expect(!cleaningMouseGate.requestDeactivation(),
+               "cleaning teardown waits for every tracked mouse button")
+        expect(!cleaningMouseGate.buttonUp(0),
+               "releasing one of several held buttons keeps cleaning teardown pending")
+        expect(cleaningMouseGate.buttonUp(2),
+               "the last matching release completes a multi-button cleaning teardown")
+
+        cleaningMouseGate.buttonDown(0)
+        expect(!cleaningMouseGate.buttonUp(0),
+               "a normal click completed before deactivation never schedules teardown by itself")
+        expect(cleaningMouseGate.requestDeactivation(),
+               "a completed click leaves no stale held-button state")
+        cleaningMouseGate.buttonDown(0)
+        _ = cleaningMouseGate.requestDeactivation()
+        cleaningMouseGate.reset()
+        expect(cleaningMouseGate.pressedButtons.isEmpty && !cleaningMouseGate.deactivationPending,
+               "forced cleaning teardown clears tracked mouse lifecycle state")
+
+        let cleaningManagerSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CleaningMode/CleaningModeManager.swift",
+            encoding: .utf8)) ?? ""
+        expect(!cleaningManagerSource.contains("CGEvent(mouseEventSource:"),
+               "Cleaning Mode never synthesizes a global mouse release")
+        expect(!cleaningManagerSource.contains("pressedMouseButtons")
+               && !cleaningManagerSource.contains("CGEventSource.buttonState"),
+               "Cleaning Mode does not infer ownership from a global button-state snapshot")
         func expect(_ condition: Bool, _ message: @autoclosure () -> String,
                     file: StaticString = #filePath, line: UInt = #line) {
             suite.expect(condition, message(), file: file, line: line)
