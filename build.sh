@@ -216,9 +216,8 @@ fi
 # suite leaves an empty plist in ~/Library/Preferences. The tests already clear
 # the domains, but cfprefsd writes the emptied file back out around the time the
 # process that owned it exits, so only a caller that outlives the run can remove
-# them. `MetricsTests` keeps every suite name inside these two namespaces (a
-# check in the test file holds it to that), which is what makes this sweep
-# complete rather than a list to keep in step by hand.
+# them. `PreferenceNamespaceTests` scans every compiled Swift test file against
+# these namespaces, which keeps this sweep complete without a second list.
 discard_test_preferences() {
     local preferences="${1:-$HOME/Library/Preferences}" name attempt
     local survivors=0 quiet_passes=0
@@ -329,6 +328,13 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Recorder/RecorderSampleTiming.swift
         Sources/Vorssaint/Services/Recorder/RecorderWriter.swift
         Sources/Vorssaint/Services/Recorder/RecorderCaptureEngine.swift
+        Sources/Vorssaint/Core/RecorderExportStrings.swift
+        Sources/Vorssaint/Services/Recorder/RecorderComposer.swift
+        Sources/Vorssaint/Services/Recorder/RecorderComposerPlan.swift
+        Sources/Vorssaint/Services/Recorder/RecorderCursorSprite.swift
+        Sources/Vorssaint/Services/Recorder/RecorderTextRenderer.swift
+        Sources/Vorssaint/Services/Recorder/RecorderImageRenderer.swift
+        Sources/Vorssaint/Services/Recorder/RecorderExporter.swift
         Sources/Vorssaint/Services/Recorder/RecorderComposition.swift
         Sources/Vorssaint/Services/Recorder/RecordingSharingSupport.swift
         Sources/Vorssaint/Services/PrivateFileStore.swift
@@ -366,6 +372,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Audio/MixerRender.swift
         Sources/Vorssaint/Services/Audio/PreciseVolumeRollerSupport.swift
         Sources/Vorssaint/Services/DockPreview/DockPreviewSupport.swift
+        Sources/Vorssaint/Services/DockPreview/DockAutohideHold.swift
         Sources/Vorssaint/Services/Homebrew/HomebrewSupport.swift
         Sources/Vorssaint/Services/AppUpdates/AppUpdatesSupport.swift
         Sources/Vorssaint/Services/AppUpdates/AppUpdateFeedSupport.swift
@@ -388,6 +395,7 @@ if (( TEST )); then
         Sources/Vorssaint/UI/Settings/SettingsWindow.swift
         Sources/Vorssaint/Core/SettingsNavigationStrings.swift
         Sources/Vorssaint/App/MenuBarSpacingSupport.swift
+        Sources/Vorssaint/App/MenuBarAllowanceSupport.swift
         Sources/Vorssaint/App/StatusItemAnchorSupport.swift
         Sources/Vorssaint/Services/DockClick/DockClickSupport.swift
         Sources/Vorssaint/Services/Finder/CutPasteProgressSupport.swift
@@ -456,6 +464,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/PortManager/PortManagerSupport.swift
         Sources/Vorssaint/Services/Metrics/NetworkProcessSupport.swift
         Sources/Vorssaint/Services/Metrics/NetworkSampler.swift
+        Sources/Vorssaint/Services/Metrics/NetworkAddressService.swift
         Sources/Vorssaint/Services/Metrics/SpeedTest.swift
         Sources/Vorssaint/Services/Metrics/PeripheralBatterySampler.swift
         Sources/Vorssaint/Services/Metrics/PeripheralBatterySupport.swift

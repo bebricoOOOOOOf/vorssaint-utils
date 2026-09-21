@@ -12,6 +12,7 @@ struct SwitcherSettings: View {
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var dockPreview = DockPreviewService.shared
     @AppStorage(DefaultsKey.switcherEnabled) private var switcherEnabled = true
+    @AppStorage(DefaultsKey.switcherShortcut) private var switcherShortcutStorage = GlobalShortcut.switcherDefault.storageValue
     @AppStorage(DefaultsKey.switcherTakeOverSystemShortcuts) private var switcherTakeOverSystemShortcuts = false
     @AppStorage(DefaultsKey.switcherIconRowMode) private var switcherIconRowMode = false
     @AppStorage(DefaultsKey.switcherSimpleMode) private var switcherSimpleMode = false
@@ -31,6 +32,7 @@ struct SwitcherSettings: View {
     @AppStorage(DefaultsKey.dockPreviewOpenDelay) private var dockPreviewOpenDelay = DockPreviewSupport.defaultOpenDelayMilliseconds
     @AppStorage(DefaultsKey.dockPreviewQuitAppOnClose) private var dockPreviewQuitAppOnClose = false
     @AppStorage(DefaultsKey.dockPreviewOrderByCreation) private var dockPreviewOrderByCreation = false
+    @AppStorage(DefaultsKey.dockPreviewKeepDockVisible) private var dockPreviewKeepDockVisible = false
     @State private var dockPreviewMoreOptionsExpanded = false
     @AppStorage(DefaultsKey.dockClickMinimize) private var dockClickMinimize = false
     @AppStorage(DefaultsKey.dockClickHide) private var dockClickHide = false
@@ -182,7 +184,7 @@ struct SwitcherSettings: View {
                         }
                 }
                 Text(String(format: l10n.s.switcherUsageHintFormat,
-                            GlobalShortcutRole.switcher.savedShortcut.displayString))
+                            (GlobalShortcut(storageValue: switcherShortcutStorage) ?? .switcherDefault).displayString))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -259,7 +261,10 @@ struct SwitcherSettings: View {
                               (SwitcherWindowlessApps.finder.rawValue, l10n.s.switcherWindowlessAppsFinder),
                               (SwitcherWindowlessApps.all.rawValue, l10n.s.switcherWindowlessAppsAll)])
                 .disabled(switcherTakeOverSystemShortcuts)
+            // Per-app rules can be prepared while the switcher is off, as
+            // before the redesign; the card's disabled state stops here.
             SwitcherAppRulesList()
+                .environment(\.isEnabled, true)
         }
     }
 
@@ -269,7 +274,9 @@ struct SwitcherSettings: View {
                          choices: [(String, String)]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsRow(symbol: symbol, title: title, caption: caption) { EmptyView() }
-            HStack(spacing: 8) {
+            // The three screen choices outgrow the card at the default window
+            // width in most languages; wrapping keeps every label whole.
+            FlowLayoutLite(spacing: 8) {
                 ForEach(choices, id: \.0) { value, label in
                     let selected = selection.wrappedValue == value
                     Button {
@@ -350,11 +357,20 @@ struct SwitcherSettings: View {
                     Toggle(l10n.s.dockPreviewQuitAppOnClose, isOn: $dockPreviewQuitAppOnClose).labelsHidden()
                 }
                 DisclosureGroup(isExpanded: $dockPreviewMoreOptionsExpanded) {
+                    SettingsRow(symbol: "dock.rectangle", title: l10n.s.dockPreviewKeepDockVisible,
+                                caption: l10n.s.dockPreviewKeepDockVisibleCaption) {
+                        Toggle(l10n.s.dockPreviewKeepDockVisible, isOn: $dockPreviewKeepDockVisible)
+                            .labelsHidden()
+                            .disabled(!DockAutohideHold.isSupported && !dockPreviewKeepDockVisible)
+                            .onChange(of: dockPreviewKeepDockVisible) { _, _ in
+                                dockPreview.syncWithPreferences()
+                            }
+                    }
+                    .padding(.top, 6)
                     SettingsRow(symbol: "clock.arrow.circlepath", title: l10n.s.dockPreviewOrderByCreation,
                                 caption: l10n.s.dockPreviewOrderByCreationCaption) {
                         Toggle(l10n.s.dockPreviewOrderByCreation, isOn: $dockPreviewOrderByCreation).labelsHidden()
                     }
-                    .padding(.top, 6)
                 } label: {
                     Text(FeatureStrings.recorder(l10n.language).moreOptions)
                         .font(.subheadline.weight(.medium))

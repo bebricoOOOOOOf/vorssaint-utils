@@ -30,6 +30,10 @@ enum SelfUninstall {
                 removeSudoersRuleIfPresent {           // may show one admin prompt
                     resetTCC()
                     DispatchQueue.main.async {
+                        // The published permissions still say granted. Read the
+                        // reset state now, or a grant made before the next poll
+                        // looks unchanged and the suspended taps never resume.
+                        Permissions.shared.refresh()
                         BrightnessService.shared.resumeInputTaps()
                         completion()
                     }
@@ -178,7 +182,6 @@ enum SelfUninstall {
     }
 
     private static func removePreferences() {
-        CommandBarQueryHabits.removeInstallationKey()
         let id = bundleID
         UserDefaults.standard.removePersistentDomain(forName: id)
         let home = NSHomeDirectory()
