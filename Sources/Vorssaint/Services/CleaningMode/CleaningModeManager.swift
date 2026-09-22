@@ -221,7 +221,17 @@ final class CleaningModeManager: ObservableObject {
         // the keyboard stays locked instead of silently coming back.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if SessionActivity.shared.isActive, AXIsProcessTrusted(), let tap {
+                // A disabled tap creates an observation gap: any tracked mouseDown
+                // may already have received its real mouseUp while we were blind.
+                // Invalidate that incomplete sequence so no later unlock can wait
+                // forever for a release that already happened. If the user had
+                // already requested deactivation, fail open after the callback.
+                let shouldFinishUserDeactivation = mouseReleaseGate.deactivationPending
+                mouseReleaseGate.reset()
                 CGEvent.tapEnable(tap: tap, enable: true)
+                if shouldFinishUserDeactivation {
+                    scheduleUserDeactivation()
+                }
                 return nil
             }
             let restoreSuspendedFeatures = SessionActivity.shared.isActive
