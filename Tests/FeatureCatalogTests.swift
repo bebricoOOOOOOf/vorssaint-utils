@@ -164,6 +164,10 @@ enum FeatureCatalogTests {
         suite.expect(!cleaningCode.contains("pressedMouseButtons")
                 && !cleaningCode.contains("CGEventSource.buttonState"),
                "Cleaning Mode does not infer ownership from a global button-state snapshot")
+        suite.expect(cleaningCode.contains("let shouldFinishUserDeactivation = mouseReleaseGate.deactivationPending")
+                && cleaningCode.contains("mouseReleaseGate.reset()")
+                && cleaningCode.contains("if shouldFinishUserDeactivation {"),
+               "disabled-tap recovery invalidates stale mouse state and preserves a pending user unlock")
 
         // The counter above cannot see how events reach it, and the real HID
         // gesture is not reproducible headlessly. Pin the two properties of the
