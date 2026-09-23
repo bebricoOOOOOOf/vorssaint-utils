@@ -88,6 +88,15 @@ enum AutoQuitSupport {
         return subrole == "AXDialog" || subrole == "AXSystemDialog"
     }
 
+    /// A system-wide focused application can differ from the frontmost client
+    /// while AppKit draws an Open/Save panel in its helper process. Only
+    /// associate that focused process with the app that is still frontmost.
+    static func shouldInspectExternalFocusedApplication(hostPID: pid_t,
+                                                        frontmostPID: pid_t,
+                                                        focusedPID: pid_t) -> Bool {
+        hostPID > 0 && frontmostPID == hostPID && focusedPID > 0 && focusedPID != hostPID
+    }
+
     static func shouldQuitAfterWindowCheck(hadWindows: Bool,
                                            appIsTerminated: Bool,
                                            appIsExcepted: Bool,

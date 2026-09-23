@@ -1250,6 +1250,16 @@ enum AppManagementFeatureTests {
         suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
             role: "AXWindow", subrole: "AXFloatingWindow", isModal: false, isFocused: true),
                "a focused floating palette is not promoted to an AutoQuit blocker")
+        suite.expect(AutoQuitSupport.shouldInspectExternalFocusedApplication(
+            hostPID: 10, frontmostPID: 10, focusedPID: 20),
+               "a focused helper process can be inspected while its client app stays frontmost")
+        suite.expect(!AutoQuitSupport.shouldInspectExternalFocusedApplication(
+            hostPID: 10, frontmostPID: 20, focusedPID: 20)
+               && !AutoQuitSupport.shouldInspectExternalFocusedApplication(
+                   hostPID: 10, frontmostPID: 10, focusedPID: 10)
+               && !AutoQuitSupport.shouldInspectExternalFocusedApplication(
+                   hostPID: 0, frontmostPID: 0, focusedPID: 20),
+               "foreign dialogs are not associated when another app is frontmost or process ids are invalid")
         let autoQuitServiceSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/AutoQuit/AutoQuitService.swift",
             encoding: .utf8)) ?? ""
