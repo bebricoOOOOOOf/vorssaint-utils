@@ -15,6 +15,10 @@ enum NotchPanelTests {
                + "instead of listing a ghost window of this app on the current space")
         expect(panel.accessibilityRole() == .window && panel.isAccessibilityElement(),
                "the island stays an accessible window for assistive technology")
+        panel.collectionBehavior = NotchPanel.overlayCollectionBehavior
+        expect(panel.collectionBehavior.contains([.canJoinAllSpaces, .fullScreenAuxiliary])
+               && panel.collectionBehavior.intersection([.managed, .stationary, .transient]) == .stationary,
+               "the island stays in place when the desktop is revealed, with no conflicting window motion policy")
         sheetContracts(expect: expect)
     }
 

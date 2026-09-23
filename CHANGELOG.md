@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Summary
+Dynamic Island improves list readability and playback controls, adds a playback source chooser, keeps artwork steady during playback changes, shows volume and brightness while open, narrows its feedback indicators, tightens spacing around the camera, improves click and scroll handling, clarifies its settings, can hide in full screen, preserves persistent notification alerts, shows files saved directly to Downloads, keeps screenshot actions within reach, and wears clear glass when Liquid Glass is enabled. App Switcher and Dock Preview bring windows forward without resizing them. Captures skip JankyBorders overlays, and the recording editor shows the full picture when choosing a zoom focus.
+
+### Added
+- Dynamic Island lets you choose the playback source, including a browser while a music app is playing, or return to Automatic. Safari appears under its own name.
+- Dynamic Island can hide while an app is in full screen on its selected display. The option is off by default.
+
+### Changed
+- Dynamic Island uses narrower volume, display brightness and keyboard backlight indicators while keeping percentages readable and the camera clear.
+- Dynamic Island shows compact activity over crowded menus by default, preserving an explicitly saved preference. Thanks to @Yahddyyp.
+- Dynamic Island uses tighter compact strips and places navigation and titles beside the camera when there is room. Update controls adapt to narrow headers in every language. Thanks to Pinea for the feedback.
+- Dynamic Island explains unavailable indicators, pages and Controls shortcuts, distinguishes app-panel opening from hover preview, aligns the custom-size sliders, and adds Scratchpad to the choice of opening destinations, opening it in the island by default.
+- Dynamic Island keeps expanded playback controls visible while player access is being set up.
+- Dynamic Island restores vertical calendar and clipboard lists and a vertical Explore grid with matching keyboard navigation. Long event titles can wrap. The mixer aligns its faders, enlarges volume controls and click targets, and shows the output device name above the controls.
+- Dynamic Island's Explore shows three rows of sections in the Compact and Spacious layouts, so most sections are in view at once. Scrolling steps whole rows and always rests aligned, one row per flick or wheel notch, and dots beside the grid show the remaining rows and jump to them.
+- Dynamic Island lists visible files and folders from the selected Downloads folder, newest first, including images saved directly from a browser.
+- Dynamic Island shows the volume mixer with a speaker icon, so its floating button no longer looks like a second settings button.
+- The Dynamic Island layout editor previews the real home page at scale, with the cards and shortcuts you have configured.
+- Dynamic Island fills shortcut and Tools rows in reading order when they fit without scrolling, and centers a short last row instead of leaving a gap in the last column. Arrow keys in Tools follow the same arrangement.
+- With Liquid Glass enabled, the expanded Dynamic Island uses clear glass with a dark top that fades toward the lower edge, keeping the desktop's detail and refraction visible. Resting and compact strips stay black, and Reduce Transparency keeps the solid surface.
+
+### Fixed
+- Dynamic Island opens on the first hover after closing under the pointer, such as after pressing Escape or clicking its header, so the activation time no longer seems longer than set.
+- Dynamic Island's clipboard page focuses its search field, so typing filters the history right away.
+- The Now Playing artwork glow and hover growth fade into the island's margins instead of being cut off at the page edge.
+- Dynamic Island keeps floating buttons clear of the menu bar and inside short windows. Empty areas between controls accept clicks and scrolling, and clicks inside the island no longer dismiss it unexpectedly.
+- Dynamic Island retains artwork through play/pause updates and briefly while the next track's cover loads, shows volume and brightness in its open header, and gives battery alerts more horizontal padding. Thanks to @Yahddyyp.
+- Window captures skip JankyBorders decorations to select the underlying window, and the recording editor temporarily removes zoom and framing while choosing a focus point. Thanks to @Yahddyyp.
+- Dynamic Island's calendar and notification times follow the system's region and 12/24-hour clock, while day and month names stay in the app's language.
+- Dynamic Island leaves room for System cards to grow on hover and keeps accessory notices compact, with device icons that do not suggest an incorrect battery level.
+- Importing lyrics, choosing the Downloads folder, renaming, closing or saving a Scratchpad and saving media from Dynamic Island open their dialogs above it, preserving its size, appearance and keyboard focus. The lyrics import button no longer looks like a save button.
+- App Switcher and Dock Preview bring the selected window forward without resizing it toward the top-left corner of the screen.
+- Dynamic Island keeps the artist visible in Now Playing while a song plays; the music bars no longer push that line out.
+- Dynamic Island's resting strips for music, battery and level feedback match the camera cutout's height and corners, so no dark line shows under the notch and opening or closing settles into it.
+- Dynamic Island restores the Beta 3 music display at rest, with artwork on the left and the equalizer on the right. Clicking it opens the music controls.
+- Dynamic Island fills System with balanced rows of metrics that adapt to its width and scroll vertically when needed.
+- Dynamic Island keeps clipboard and mixer actions visible in short layouts and fits the camera mirror at 4:3 with room for its stop button. Horizontal scrollbars no longer cover controls.
+- Dynamic Island leaves persistent native alerts open when replacing notifications, so mirroring an alarm does not dismiss it.
+- Screenshot preview actions stay in the Dynamic Island header above the image, with compact buttons that leave room for the title at smaller widths.
+- Dynamic Island animates its dismissal on displays without a camera cutout when there is no safe resting space in the menu bar.
+- Dynamic Island keeps the battery icon and percentage clear of its curved edges, including the full `100%` label.
+- Dynamic Island opens and closes cleanly inside Mission Control, instead of its closed shape briefly stretching over the area it occupied while open.
+
 ## [3.4.0-beta.3] - 2026-09-20
 
 ### Summary
