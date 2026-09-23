@@ -1236,8 +1236,8 @@ enum AppManagementFeatureTests {
         suite.expect(!AutoQuitSupport.isWindowNotificationRegistered(.cannotComplete),
                "a window whose registration was refused is not watched")
         suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
-            role: "AXWindow", subrole: "AXSystemDialog", isModal: false, isFocused: true),
-               "a focused system dialog blocks AutoQuit while the user is choosing a file")
+            role: "AXWindow", subrole: "AXDialog", isModal: false, isFocused: true),
+               "a focused app-specific dialog blocks AutoQuit while the user is choosing a file")
         suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
             role: "AXWindow", subrole: "AXDialog", isModal: true, isFocused: false),
                "a modal dialog blocks AutoQuit even when focus briefly moves")
@@ -1246,7 +1246,10 @@ enum AppManagementFeatureTests {
                "a modal sheet blocks AutoQuit")
         suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
             role: "AXWindow", subrole: "AXSystemDialog", isModal: false, isFocused: false),
-               "a passive system-dialog record does not keep an app alive")
+               "a system-wide dialog record does not keep a particular app alive")
+        suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXSystemDialog", isModal: true, isFocused: true),
+               "a system-wide alert is not attributed to whichever app was frontmost")
         suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
             role: "AXWindow", subrole: "AXFloatingWindow", isModal: false, isFocused: true),
                "a focused floating palette is not promoted to an AutoQuit blocker")
