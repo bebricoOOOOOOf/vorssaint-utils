@@ -73,6 +73,21 @@ enum AutoQuitSupport {
         result == .success || result == .notificationAlreadyRegistered
     }
 
+    /// A transient modal surface can be the only thing the user is actively
+    /// interacting with after an app's last standard window disappears. Open
+    /// and save panels are the important case: modern macOS renders them in a
+    /// separate process, so the window-server fallback cannot attribute them to
+    /// the client app. Keep the app alive only while such a dialog is actually
+    /// focused or modal; passive palettes and stray dialog records do not count.
+    static func transientInteractionBlocksQuit(role: String?,
+                                               subrole: String?,
+                                               isModal: Bool,
+                                               isFocused: Bool) -> Bool {
+        guard isModal || isFocused else { return false }
+        if role == "AXSheet" { return true }
+        return subrole == "AXDialog" || subrole == "AXSystemDialog"
+    }
+
     static func shouldQuitAfterWindowCheck(hadWindows: Bool,
                                            appIsTerminated: Bool,
                                            appIsExcepted: Bool,

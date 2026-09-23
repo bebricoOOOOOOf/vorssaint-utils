@@ -436,9 +436,16 @@ final class AutoQuitService: ObservableObject {
         let appElement = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(appElement, 0.35)
         let windows = standardWindows(of: appElement)
+        let transientWindows = quitBlockingTransientWindows(of: appElement)
         var watchedWindows = 0
         for window in windows {
             if watch(window: window, observer: observer, refcon: refcon) { watchedWindows += 1 }
+        }
+        // Do not promote dialogs into "had windows": a window-less agent that
+        // happens to show a prompt must stay ineligible for auto-quit. We only
+        // watch these transient surfaces so closing one schedules a fresh check.
+        for window in transientWindows {
+            _ = watch(window: window, observer: observer, refcon: refcon)
         }
         recordMinimizedWindows(pid: pid, windows: windows)
         // The window-server scan is only needed when Accessibility handed us
@@ -568,6 +575,38 @@ final class AutoQuitService: ObservableObject {
         windows.append(window)
     }
 
+    /// Main/focused non-standard windows that represent an active modal
+    /// interaction. They block auto-quit without becoming ordinary app windows.
+    private func quitBlockingTransientWindows(of appElement: AXUIElement) -> [AXUIElement] {
+        var result: [AXUIElement] = []
+        for attribute in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+            guard let window = Self.windowAttribute(appElement, attribute as String),
+                  !result.contains(where: { CFEqual($0, window) }) else { continue }
+            AXUIElementSetMessagingTimeout(window, 0.35)
+            guard !Self.isStandardWindow(window),
+                  Self.isQuitBlockingTransientWindow(window) else { continue }
+            result.append(window)
+        }
+        return result
+    }
+
+    private static func isQuitBlockingTransientWindow(_ window: AXUIElement) -> Bool {
+        var subroleValue: CFTypeRef?
+        let subrole: String?
+        if AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleValue) == .success {
+            subrole = subroleValue as? String
+        } else {
+            subrole = nil
+        }
+
+        return AutoQuitSupport.transientInteractionBlocksQuit(
+            role: role(of: window),
+            subrole: subrole,
+            isModal: boolAttribute(window, "AXModal"),
+            isFocused: boolAttribute(window, kAXFocusedAttribute as String)
+        )
+    }
+
     private static func windowAttribute(_ appElement: AXUIElement, _ attribute: String) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElement, attribute as CFString, &value) == .success,
@@ -589,6 +628,9 @@ final class AutoQuitService: ObservableObject {
     private func hasUserFacingWindow(pid: pid_t, appElement: AXUIElement) -> Bool {
         let axWindows = standardWindows(of: appElement)
         if axWindows.contains(where: { Self.boolAttribute($0, kAXMinimizedAttribute as String) }) {
+            return true
+        }
+        if !quitBlockingTransientWindows(of: appElement).isEmpty {
             return true
         }
         if let hasWindowServerWindow = hasWindowServerUserWindow(pid: pid) {

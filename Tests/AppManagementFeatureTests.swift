@@ -1235,6 +1235,21 @@ enum AppManagementFeatureTests {
                "a window already registered on this observer stays watched across refreshes")
         suite.expect(!AutoQuitSupport.isWindowNotificationRegistered(.cannotComplete),
                "a window whose registration was refused is not watched")
+        suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXSystemDialog", isModal: false, isFocused: true),
+               "a focused system dialog blocks AutoQuit while the user is choosing a file")
+        suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXDialog", isModal: true, isFocused: false),
+               "a modal dialog blocks AutoQuit even when focus briefly moves")
+        suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXSheet", subrole: nil, isModal: true, isFocused: false),
+               "a modal sheet blocks AutoQuit")
+        suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXSystemDialog", isModal: false, isFocused: false),
+               "a passive system-dialog record does not keep an app alive")
+        suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXFloatingWindow", isModal: false, isFocused: true),
+               "a focused floating palette is not promoted to an AutoQuit blocker")
         let autoQuitServiceSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/AutoQuit/AutoQuitService.swift",
             encoding: .utf8)) ?? ""
