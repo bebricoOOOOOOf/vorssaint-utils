@@ -732,6 +732,44 @@ final class AutoQuitService: ObservableObject {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == hostPID else { return false }
         let systemElement = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(systemElement, 0.35)
+
+        // Sheets are top-level accessibility elements, but Apple explicitly
+        // excludes them from AXWindow. Resolve the focused element's top-level
+        // surface so an active sheet is not lost behind its parent window.
+        var focusedElementValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(systemElement,
+                                        kAXFocusedUIElementAttribute as CFString,
+                                        &focusedElementValue) == .success,
+           let focusedElementValue,
+           CFGetTypeID(focusedElementValue) == AXUIElementGetTypeID() {
+            let focusedElement = focusedElementValue as! AXUIElement
+            AXUIElementSetMessagingTimeout(focusedElement, 0.35)
+            var focusedElementPID: pid_t = 0
+            AXUIElementGetPid(focusedElement, &focusedElementPID)
+            if let topLevel = Self.windowAttribute(focusedElement, kAXTopLevelUIElementAttribute as String) {
+                var topLevelPID: pid_t = 0
+                AXUIElementGetPid(topLevel, &topLevelPID)
+                let focusedPID = topLevelPID > 0 ? topLevelPID : focusedElementPID
+                let belongsToHost = focusedPID == hostPID
+                    || AutoQuitSupport.shouldInspectExternalFocusedApplication(
+                        hostPID: hostPID,
+                        frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,
+                        focusedPID: focusedPID)
+                if belongsToHost,
+                   !Self.isStandardWindow(topLevel),
+                   Self.isQuitBlockingTransientWindow(topLevel) {
+                    if focusedPID == hostPID, let observer = observers[hostPID] {
+                        _ = watch(window: topLevel,
+                                  observer: observer,
+                                  refcon: Unmanaged.passUnretained(self).toOpaque())
+                    } else {
+                        watch(transientWindow: topLevel, hostPID: hostPID, transientPID: focusedPID)
+                    }
+                    return true
+                }
+            }
+        }
+
         var focusedApplicationValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemElement,
                                             kAXFocusedApplicationAttribute as CFString,
