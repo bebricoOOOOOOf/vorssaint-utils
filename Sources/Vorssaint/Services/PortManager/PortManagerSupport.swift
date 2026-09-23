@@ -11,6 +11,13 @@ struct PortManagerEntry: Identifiable, Equatable {
     let processName: String
     let startedAt: UInt64?
     var id: String { "\(protocolName)-\(port)-\(pid)-\(address)" }
+
+    var listensOnAllInterfaces: Bool {
+        let suffix = ":\(port)"
+        guard address.hasSuffix(suffix) else { return false }
+        let host = address.dropLast(suffix.count)
+        return host == "*" || host == "0.0.0.0" || host == "::" || host == "[::]"
+    }
 }
 
 enum PortManagerSupport {

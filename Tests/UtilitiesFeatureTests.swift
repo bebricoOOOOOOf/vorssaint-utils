@@ -33,6 +33,20 @@ enum UtilitiesFeatureTests {
                "port parser keeps every distinct listening endpoint and removes exact duplicates")
         suite.expect(parsedPorts.filter { $0.pid == 123 }.count == 3,
                "port parser keeps multiple ports and address families for one process")
+        suite.expect(parsedPorts.filter(\.listensOnAllInterfaces).count == 2,
+               "wildcard listeners are marked while loopback listeners are not")
+        for address in ["0.0.0.0:3000", "[::]:3000", ":::3000"] {
+            let entry = PortManagerEntry(port: 3000, protocolName: "TCP", address: address,
+                                         pid: 123, processName: "Example", startedAt: nil)
+            suite.expect(entry.listensOnAllInterfaces,
+                   "the all-interface marker recognizes \(address)")
+        }
+        for address in ["127.0.0.1:3000", "[::1]:3000", "192.168.1.10:3000"] {
+            let entry = PortManagerEntry(port: 3000, protocolName: "TCP", address: address,
+                                         pid: 123, processName: "Example", startedAt: nil)
+            suite.expect(!entry.listensOnAllInterfaces,
+                   "the all-interface marker excludes \(address)")
+        }
 
         let invalidEndpointFixture = """
         p789
@@ -49,6 +63,8 @@ enum UtilitiesFeatureTests {
             let strings = FeatureStrings.portManager(lang)
             suite.expect(!strings.hubDescription.isEmpty,
                    "port manager has a non-empty hub description for \(lang)")
+            suite.expect(!strings.allInterfaces.isEmpty,
+                   "port manager has a label for wildcard listeners in \(lang)")
         }
         suite.expect(Defaults.registeredDefaults[DefaultsKey.panelUtilityPortManager] as? Bool == true,
                "the port manager panel row ships visible like its siblings and travels in backups")

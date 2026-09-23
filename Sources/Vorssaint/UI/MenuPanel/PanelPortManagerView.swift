@@ -169,6 +169,15 @@ struct PanelPortManagerView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4).padding(.vertical, 1.5)
                         .background(Color.primary.opacity(0.08), in: Capsule())
+                    if entry.listensOnAllInterfaces {
+                        Image(systemName: "globe")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .padding(3)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                            .help(strings.allInterfaces)
+                            .accessibilityLabel(strings.allInterfaces)
+                    }
                 }
                 Text(entry.processName)
                     .font(.system(size: 10.5))
