@@ -135,6 +135,11 @@ final class CleaningModeManager: ObservableObject {
         scheduleUserDeactivation()
     }
 
+    /// Permission teardown must remove the tap before Accessibility is reset.
+    func deactivateForSystemTeardown() {
+        deactivate(restoreSuspendedFeatures: true)
+    }
+
     private func deactivate(restoreSuspendedFeatures: Bool) {
         guard isActive else { return }
         // Session/tap failure paths cannot wait for another input event. They
@@ -144,10 +149,11 @@ final class CleaningModeManager: ObservableObject {
 
     private func scheduleUserDeactivation() {
         // Even when no button is currently held, leave the AppKit control action
-        // before unmapping its non-activating panel. If we were waiting for a
-        // release, buttonUp() clears deactivationPending before scheduling this.
+        // before unmapping its non-activating panel. A new press may arrive before
+        // this block runs, so keep the request pending until teardown completes.
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.isActive, !self.mouseReleaseGate.deactivationPending else { return }
+            guard let self, self.isActive, self.mouseReleaseGate.deactivationPending,
+                  self.mouseReleaseGate.pressedButtons.isEmpty else { return }
             self.finishDeactivation(restoreSuspendedFeatures: true)
         }
     }
@@ -227,7 +233,7 @@ final class CleaningModeManager: ObservableObject {
                 // forever for a release that already happened. If the user had
                 // already requested deactivation, fail open after the callback.
                 let shouldFinishUserDeactivation = mouseReleaseGate.deactivationPending
-                mouseReleaseGate.reset()
+                mouseReleaseGate.invalidateTrackedPresses()
                 CGEvent.tapEnable(tap: tap, enable: true)
                 if shouldFinishUserDeactivation {
                     scheduleUserDeactivation()

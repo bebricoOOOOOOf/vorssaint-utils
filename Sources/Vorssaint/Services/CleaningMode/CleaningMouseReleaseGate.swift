@@ -6,9 +6,9 @@ import Foundation
 /// Tracks mouse presses that actually began while Cleaning Mode was active.
 ///
 /// The gate never queries global button state and never synthesizes input. A
-/// user-requested deactivation that arrives mid-click waits until every tracked
-/// press receives its real matching release. Forced lifecycle teardown (session
-/// switch, disabled tap) intentionally bypasses this gate in the manager.
+/// user-requested deactivation waits until every tracked press receives its
+/// real matching release, including presses seen before queued teardown runs.
+/// Forced lifecycle teardown (session switch, permission reset) bypasses this gate.
 struct CleaningMouseReleaseGate {
     private(set) var pressedButtons: Set<Int64> = []
     private(set) var deactivationPending = false
@@ -20,17 +20,19 @@ struct CleaningMouseReleaseGate {
     /// Returns true when this release completes a pending deactivation.
     @discardableResult
     mutating func buttonUp(_ button: Int64) -> Bool {
-        pressedButtons.remove(button)
-        guard deactivationPending, pressedButtons.isEmpty else { return false }
-        deactivationPending = false
-        return true
+        let wasTracked = pressedButtons.remove(button) != nil
+        return wasTracked && deactivationPending && pressedButtons.isEmpty
     }
 
     /// Returns true when teardown may be scheduled immediately.
     mutating func requestDeactivation() -> Bool {
-        guard !pressedButtons.isEmpty else { return true }
         deactivationPending = true
-        return false
+        return pressedButtons.isEmpty
+    }
+
+    /// A disabled tap may have missed releases, but the user's request survives.
+    mutating func invalidateTrackedPresses() {
+        pressedButtons.removeAll()
     }
 
     mutating func reset() {

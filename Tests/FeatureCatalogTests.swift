@@ -122,9 +122,12 @@ enum FeatureCatalogTests {
                "an unrelated release cannot complete a pending cleaning teardown")
         suite.expect(cleaningMouseGate.buttonUp(0),
                "the matching physical release completes the pending cleaning teardown")
+        suite.expect(cleaningMouseGate.deactivationPending,
+               "the cleaning unlock request remains pending until teardown runs")
         suite.expect(cleaningMouseGate.requestDeactivation(),
                "cleaning teardown is immediate when no tracked button is held")
 
+        cleaningMouseGate.reset()
         cleaningMouseGate.buttonDown(0)
         cleaningMouseGate.buttonDown(2)
         suite.expect(!cleaningMouseGate.requestDeactivation(),
@@ -134,6 +137,7 @@ enum FeatureCatalogTests {
         suite.expect(cleaningMouseGate.buttonUp(2),
                "the last matching release completes a multi-button cleaning teardown")
 
+        cleaningMouseGate.reset()
         cleaningMouseGate.buttonDown(0)
         suite.expect(!cleaningMouseGate.buttonUp(0),
                "a normal click completed before deactivation never schedules teardown by itself")
@@ -144,6 +148,37 @@ enum FeatureCatalogTests {
         cleaningMouseGate.reset()
         suite.expect(cleaningMouseGate.pressedButtons.isEmpty && !cleaningMouseGate.deactivationPending,
                "forced cleaning teardown clears tracked mouse lifecycle state")
+
+        var queuedCleaningMouseGate = CleaningMouseReleaseGate()
+        suite.expect(queuedCleaningMouseGate.requestDeactivation(),
+               "cleaning teardown can be queued when no button is held")
+        queuedCleaningMouseGate.buttonDown(0)
+        suite.expect(queuedCleaningMouseGate.deactivationPending
+                && !queuedCleaningMouseGate.pressedButtons.isEmpty,
+               "a new press before queued teardown is still tracked")
+        suite.expect(!queuedCleaningMouseGate.buttonUp(1),
+               "an unrelated release cannot finish a newly tracked press")
+        suite.expect(queuedCleaningMouseGate.buttonUp(0),
+               "the new press must receive its matching release")
+        queuedCleaningMouseGate.buttonDown(2)
+        suite.expect(queuedCleaningMouseGate.deactivationPending
+                && !queuedCleaningMouseGate.pressedButtons.isEmpty,
+               "a press after the last release still postpones queued teardown")
+        suite.expect(queuedCleaningMouseGate.buttonUp(2),
+               "the final new press also needs its matching release")
+
+        var disabledTapMouseGate = CleaningMouseReleaseGate()
+        disabledTapMouseGate.buttonDown(0)
+        _ = disabledTapMouseGate.requestDeactivation()
+        disabledTapMouseGate.invalidateTrackedPresses()
+        suite.expect(disabledTapMouseGate.pressedButtons.isEmpty
+                && disabledTapMouseGate.deactivationPending,
+               "a tap gap forgets stale presses without losing the unlock request")
+        disabledTapMouseGate.buttonDown(1)
+        suite.expect(!disabledTapMouseGate.buttonUp(0),
+               "a release from before the tap gap cannot finish a new press")
+        suite.expect(disabledTapMouseGate.buttonUp(1),
+               "a fresh press after the tap gap still needs its own release")
 
         // The counters above build their own windows, so nothing else here
         // fails if the shipped constant regresses. Pin it at the source: the
@@ -165,9 +200,12 @@ enum FeatureCatalogTests {
                 && !cleaningCode.contains("CGEventSource.buttonState"),
                "Cleaning Mode does not infer ownership from a global button-state snapshot")
         suite.expect(cleaningCode.contains("let shouldFinishUserDeactivation = mouseReleaseGate.deactivationPending")
-                && cleaningCode.contains("mouseReleaseGate.reset()")
+                && cleaningCode.contains("mouseReleaseGate.invalidateTrackedPresses()")
                 && cleaningCode.contains("if shouldFinishUserDeactivation {"),
                "disabled-tap recovery invalidates stale mouse state and preserves a pending user unlock")
+        suite.expect(cleaningCode.contains("self.mouseReleaseGate.deactivationPending,")
+                && cleaningCode.contains("self.mouseReleaseGate.pressedButtons.isEmpty else { return }"),
+               "queued cleaning teardown rechecks the current press state")
 
         // The counter above cannot see how events reach it, and the real HID
         // gesture is not reproducible headlessly. Pin the two properties of the
