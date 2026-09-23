@@ -83,8 +83,9 @@ enum AutoQuitSupport {
     static func transientInteractionBlocksQuit(role: String?,
                                                subrole: String?,
                                                isModal: Bool,
-                                               isFocused: Bool) -> Bool {
-        guard isModal || isFocused else { return false }
+                                               isFocused: Bool,
+                                               hasFocusedDescendant: Bool = false) -> Bool {
+        guard isModal || isFocused || hasFocusedDescendant else { return false }
         if role == "AXSheet" { return true }
         return subrole == "AXDialog"
     }

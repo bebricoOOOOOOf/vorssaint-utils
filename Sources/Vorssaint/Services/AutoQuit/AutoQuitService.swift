@@ -663,7 +663,8 @@ final class AutoQuitService: ObservableObject {
         return result
     }
 
-    private static func isQuitBlockingTransientWindow(_ window: AXUIElement) -> Bool {
+    private static func isQuitBlockingTransientWindow(_ window: AXUIElement,
+                                                     hasFocusedDescendant: Bool = false) -> Bool {
         var subroleValue: CFTypeRef?
         let subrole: String?
         if AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subroleValue) == .success {
@@ -676,7 +677,8 @@ final class AutoQuitService: ObservableObject {
             role: role(of: window),
             subrole: subrole,
             isModal: boolAttribute(window, "AXModal"),
-            isFocused: boolAttribute(window, kAXFocusedAttribute as String)
+            isFocused: boolAttribute(window, kAXFocusedAttribute as String),
+            hasFocusedDescendant: hasFocusedDescendant
         )
     }
 
@@ -747,6 +749,7 @@ final class AutoQuitService: ObservableObject {
             var focusedElementPID: pid_t = 0
             AXUIElementGetPid(focusedElement, &focusedElementPID)
             if let topLevel = Self.windowAttribute(focusedElement, kAXTopLevelUIElementAttribute as String) {
+                AXUIElementSetMessagingTimeout(topLevel, 0.35)
                 var topLevelPID: pid_t = 0
                 AXUIElementGetPid(topLevel, &topLevelPID)
                 let focusedPID = topLevelPID > 0 ? topLevelPID : focusedElementPID
@@ -757,7 +760,7 @@ final class AutoQuitService: ObservableObject {
                         focusedPID: focusedPID)
                 if belongsToHost,
                    !Self.isStandardWindow(topLevel),
-                   Self.isQuitBlockingTransientWindow(topLevel) {
+                   Self.isQuitBlockingTransientWindow(topLevel, hasFocusedDescendant: true) {
                     if focusedPID == hostPID, let observer = observers[hostPID] {
                         _ = watch(window: topLevel,
                                   observer: observer,

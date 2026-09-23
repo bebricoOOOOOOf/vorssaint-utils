@@ -1239,6 +1239,13 @@ enum AppManagementFeatureTests {
             role: "AXWindow", subrole: "AXDialog", isModal: false, isFocused: true),
                "a focused app-specific dialog blocks AutoQuit while the user is choosing a file")
         suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXDialog", isModal: false, isFocused: false,
+            hasFocusedDescendant: true),
+               "a dialog containing the system-wide focused control blocks AutoQuit")
+        suite.expect(!AutoQuitSupport.transientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXDialog", isModal: false, isFocused: false),
+               "an unfocused passive dialog does not block AutoQuit")
+        suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
             role: "AXWindow", subrole: "AXDialog", isModal: true, isFocused: false),
                "a modal dialog blocks AutoQuit even when focus briefly moves")
         suite.expect(AutoQuitSupport.transientInteractionBlocksQuit(
