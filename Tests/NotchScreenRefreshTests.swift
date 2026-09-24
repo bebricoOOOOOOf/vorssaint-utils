@@ -57,6 +57,11 @@ enum NotchScreenRefreshContract {
         var resignations = 0
         func resignKey() { resignations += 1 }
     }
+    enum NSEvent { static var mouseLocation = CGPoint.zero }
+    final class Host {
+        var rect = CGRect.zero
+        func containsHover(_ point: CGPoint) -> Bool { rect.contains(point) }
+    }
     class State {
         var hiddenInFullscreen = false
         func fullscreenEnvironmentDidChange() {}
@@ -75,9 +80,12 @@ enum NotchScreenRefreshContract {
         var geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                      safeAreaTop: 32, cameraWidth: 210, compactSideRoom: 64)
         var panel: Panel? = Panel()
+        var windowHost: Host? = Host()
         var modules: [NotchModule] = [.controls]
         var pinned = false
         var keepsWorkingSurface = false
+        var openedByHover = false
+        var clickedSinceOpening = false
         var preferenceSyncs = 0
         var reads = 0
         var appliedRooms: [CGFloat?] = []
@@ -234,6 +242,31 @@ enum NotchScreenRefreshContract {
         suite.expect(simulated.reads == beforeReads + 3, "a suspended island ignores activations")
         simulated.suspended = false
 
+        let hovered = Service()
+        hovered.expanded = true
+        hovered.openedByHover = true
+        hovered.windowHost?.rect = hovered.geometry.frame(for: hovered.geometry.expanded)
+        let onIsland = CGPoint(x: hovered.geometry.screen.midX, y: hovered.geometry.screen.maxY - 1)
+        NSEvent.mouseLocation = onIsland
+        NSWorkspace.shared.frontmostApplication = RunningApplication(bundleIdentifier: "com.example.editor")
+        hovered.applicationDidActivate()
+        suite.expect(hovered.collapses == 0 && hovered.panel?.resignations == 1,
+               "an island hover opened stays under the pointer when reaching it makes the app beneath active, "
+               + "such as a full-screen app on a display without focus")
+        hovered.clickedSinceOpening = true
+        hovered.applicationDidActivate()
+        suite.expect(hovered.collapses == 1,
+               "after a click inside, which may be what opened the other app, the island still closes as it comes forward")
+        hovered.clickedSinceOpening = false
+        NSEvent.mouseLocation = CGPoint(x: hovered.geometry.screen.minX, y: hovered.geometry.screen.minY)
+        hovered.applicationDidActivate()
+        suite.expect(hovered.collapses == 2, "an island hover opened closes when another app activates away from the pointer")
+        hovered.openedByHover = false
+        NSEvent.mouseLocation = onIsland
+        hovered.applicationDidActivate()
+        suite.expect(hovered.collapses == 3,
+               "an island opened by a click or shortcut still closes when another app activates under the pointer")
+
         let covering = Service()
         covering.geometry.compactSideRoom = nil
         covering.accessibilityGranted = false
@@ -258,6 +291,20 @@ enum NotchScreenRefreshContract {
         covering.syncMenuSpaceMonitoring()
         suite.expect(covering.menuSpaceTimer != nil && covering.reads == 1,
                "giving way to the menus again resumes the existing reader")
+
+        let idleSimulated = Service()
+        idleSimulated.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                                               safeAreaTop: 0, cameraWidth: 0)
+        idleSimulated.idleContent = .none
+        idleSimulated.accessibilityGranted = false
+        idleSimulated.coversMenus = true
+        idleSimulated.syncMenuSpaceMonitoring()
+        suite.expect(idleSimulated.appliedRooms.isEmpty && idleSimulated.geometry.compactSideRoom == nil,
+               "a simulated cutout with nothing to show still gives way to the menus")
+        idleSimulated.compactActivity = true
+        idleSimulated.syncMenuSpaceMonitoring()
+        suite.expect(idleSimulated.geometry.compactSideRoom.map { $0 > 0 } == true,
+               "compact activity on a simulated cutout covers the menus")
 
         let physical = Service()
         physical.idleContent = .none

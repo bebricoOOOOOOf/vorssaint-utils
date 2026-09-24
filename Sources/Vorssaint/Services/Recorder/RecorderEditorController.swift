@@ -352,6 +352,15 @@ final class RecorderEditorModel: ObservableObject, BackdropEditing {
     }
 
     private func documentDidChange(from previous: RecorderEditDocument) {
+        // Undo, a look or a preset can take the selected zoom away. A
+        // selection left pointing at nothing turns aiming into a click that
+        // does nothing; clearing it also ends aiming and restores the preview.
+        if let selectedZoomID, zoom(selectedZoomID) == nil { self.selectedZoomID = nil }
+        // The same goes for a blur whose area is being drawn.
+        if let selectedBlurID, !document.blurs.contains(where: { $0.id == selectedBlurID }) {
+            self.selectedBlurID = nil
+            endPickingBlurArea()
+        }
         guard !suppressUndo, previous != document else { return }
         undoStack.append(previous)
         redoStack.removeAll()
@@ -1208,10 +1217,26 @@ final class RecorderEditorModel: ObservableObject, BackdropEditing {
         var next = document
         next.blurs = next.blurs.map { item -> RecorderBlurRegion in
             guard item.id == id else { return item }
-            return RecorderBlurRegion(id: item.id, start: item.start, end: item.end, rect: rect)
+            return RecorderBlurRegion(id: item.id, start: item.start, end: item.end, rect: rect,
+                                      strength: item.strength)
         }
         applyDuringInteraction(next)
         commitZoomEdit()
+    }
+
+    func setSelectedBlurStrength(_ strength: Int) {
+        guard let id = selectedBlurID else { return }
+        let level = ScreenshotSupport.BlurStrength.sanitized(strength)
+        guard document.blurs.first(where: { $0.id == id })?.strength != level else { return }
+        beginInteraction()
+        var next = document
+        next.blurs = next.blurs.map { item -> RecorderBlurRegion in
+            guard item.id == id else { return item }
+            var copy = item
+            copy.strength = level
+            return copy
+        }
+        applyDuringInteraction(next)
     }
 
     func removeSelectedBlur() {

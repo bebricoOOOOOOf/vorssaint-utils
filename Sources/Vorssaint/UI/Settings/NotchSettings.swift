@@ -60,6 +60,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCaptureControls) private var captureControls = true
     @AppStorage(DefaultsKey.notchQuickPanel) private var quickPanel = true
     @AppStorage(DefaultsKey.notchAppPanel) private var appPanel = true
+    @AppStorage(DefaultsKey.notchHidesMenuBarIcon) private var hidesMenuBarIcon = false
     @AppStorage(DefaultsKey.notchScratchpad) private var scratchpad = true
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessControlEnabled = false
     @AppStorage(DefaultsKey.clipboardHistoryEnabled) private var clipboardHistoryEnabled = false
@@ -100,7 +101,7 @@ struct NotchSettings: View {
                 Toggle(text.enable, isOn: $enabled).labelsHidden().toggleStyle(.switch)
                     .disabled(!AppFeature.notch.isAvailable).accessibilityLabel(text.enable)
             }
-            if enabled, AppFeature.notch.isAvailable, !(hover && hideUntilHover), !coversMenus, !notch.geometry.isNotched, !permissions.accessibility {
+            if enabled, AppFeature.notch.isAvailable, !(hover && hideUntilHover), !notch.geometry.isNotched, !permissions.accessibility {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(text.menuBarAccessHint)
                         .font(.callout).foregroundStyle(.secondary)
@@ -231,7 +232,7 @@ struct NotchSettings: View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(editor.sections).font(.headline)
-                Text(editor.reorderHint).font(.caption).foregroundStyle(.secondary)
+                Text(editor.sectionsHint).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 6)
@@ -366,7 +367,7 @@ struct NotchSettings: View {
                     idleChoice(.battery, title: text.battery, symbol: "battery.75percent")
                     idleChoice(.music, title: text.music, symbol: "music.note")
                     // Offered once the section is on; the island would show nothing before.
-                    if agentsEnabled, NotchAgentSupport.isEnabled() {
+                    if offersAgentsResting {
                         idleChoice(.agents, title: FeatureStrings.notchAgents(l10n.language).restingTitle, symbol: "sparkles")
                     }
                 }
@@ -456,6 +457,8 @@ struct NotchSettings: View {
             SettingsCard(title: editor.destinations) {
                 destination(text.panel, symbol: "bubble.middle.top", value: $appPanel)
                 Text(editor.appPanelHint).font(.caption).foregroundStyle(.secondary)
+                switchRow("menubar.rectangle", editor.hideMenuBarIcon, caption: editor.hideMenuBarIconHint,
+                          isOn: $hidesMenuBarIcon)
                 destination(text.tools, symbol: "square.grid.2x2", value: $quickPanel, available: AppFeature.quickLauncher.isAvailable)
                 destination(FeatureStrings.clipboard(l10n.language).title, symbol: "doc.on.clipboard", value: $clipboardWindow, available: AppFeature.clipboardHistory.isAvailable)
                 destination(text.files, symbol: "tray.full", value: $shelfWindow, available: AppFeature.shelf.isAvailable)
@@ -560,6 +563,15 @@ struct NotchSettings: View {
                         reservesReason: reservesReason) { value.wrappedValue.toggle() }
     }
 
+    private var offersAgentsResting: Bool { agentsEnabled && NotchAgentSupport.isEnabled() }
+
+    /// What the closed island rests with. A saved AI reading waits, unchanged,
+    /// while its section is off, and the island rests empty meanwhile.
+    private var restingChoice: NotchIdleContent {
+        let choice: NotchIdleContent = NotchIdleContent(rawValue: idle) ?? .none
+        return choice == .agents && !offersAgentsResting ? .none : choice
+    }
+
     private func idleChoice(_ item: NotchIdleContent, title: String, symbol: String) -> some View {
         Button { idle = item.rawValue } label: {
             VStack(spacing: 14) {
@@ -573,8 +585,8 @@ struct NotchSettings: View {
                 }.foregroundStyle(.white).padding(10).background(.black, in: Capsule())
                 Text(title).font(.system(size: 11, weight: .medium))
             }.frame(maxWidth: .infinity).padding(.vertical, 14)
-                .background((NotchIdleContent(rawValue: idle) ?? .none) == item ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain).accessibilityAddTraits((NotchIdleContent(rawValue: idle) ?? .none) == item ? .isSelected : [])
+                .background(restingChoice == item ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).accessibilityAddTraits(restingChoice == item ? .isSelected : [])
     }
 
     private func destination(_ title: String, symbol: String, value: Binding<Bool>, available: Bool = true) -> some View {
