@@ -267,6 +267,26 @@ private struct NotchSettingsPreviewKey: EnvironmentKey {
 final class NotchBackdropPresentation: ObservableObject {
     @Published var contour = Path()
     @Published var usesGlass = false
+    @Published private(set) var fade = NotchGlassFade.open
+
+    var openness: Double { Double(fade.openness(atHeight: contour.boundingRect.height)) }
+
+    /// Plans a resize from `start` to `end` from what is on screen now.
+    func planFade(from start: CGFloat, to end: CGFloat, endsInGlass: Bool) {
+        setFade(.plan(from: start, to: end, endsInGlass: endsInGlass,
+                      current: usesGlass ? fade.openness(atHeight: start) : 0))
+    }
+
+    func openFully() { setFade(.open) }
+
+    /// The fade follows the moving contour frame by frame; SwiftUI must not
+    /// add an animation of its own on top.
+    private func setFade(_ next: NotchGlassFade) {
+        guard fade != next else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { fade = next }
+    }
 }
 
 struct NotchBackdropShape: Shape {
@@ -300,10 +320,13 @@ struct NotchSurfaceBackground: View {
                     .environment(\.appearsActive, true)
                     .materialActiveAppearance(.active)
                     .overlay {
+                        // Near a black strip the lip closes up, so the last
+                        // frames of a collapse already match the resting island.
+                        let openness = presentation.openness
                         let stops = (0...64).map { index in
                             let t = Double(index) / 64
                             return Gradient.Stop(
-                                color: .black.opacity(1 - (contrast == .increased ? 0.10 : 0.45) * pow(t, 2.5)),
+                                color: .black.opacity(1 - openness * (contrast == .increased ? 0.10 : 0.45) * pow(t, 2.5)),
                                 location: t)
                         }
                         LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
@@ -475,5 +498,45 @@ private struct NotchMenuAnchorView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         anchor.view = nsView
+    }
+}
+
+extension NSAlert {
+    /// A SwiftUI alert or confirmation dialog hangs from the island as a
+    /// sheet, which moves and reskins the borderless surface. Inside the
+    /// island a tool asks the same question on its own, just above it, like
+    /// the Scratchpad page does, and the island gets the keyboard back after.
+    static func confirmAboveIsland(_ title: String, message: String, action: String,
+                                   destructive: Bool, cancel: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: action).hasDestructiveAction = destructive
+        // Escape cancels in every language, like the dialog's cancel role.
+        alert.addButton(withTitle: cancel).keyEquivalent = "\u{1b}"
+        return alert.runAboveIsland() == .alertFirstButtonReturn
+    }
+
+    private func runAboveIsland() -> NSApplication.ModalResponse {
+        let island = NotchService.shared.presentationWindow
+        var observers: [NSObjectProtocol] = []
+        if let island {
+            // The modal session puts the alert at the modal panel level, below
+            // the island, and puts it back there when it activates the app or
+            // makes the alert key. Raise it once running and after each of those.
+            let level = NSWindow.Level(rawValue: island.level.rawValue + 1)
+            let alertWindow = window
+            let raise: (Notification) -> Void = { _ in alertWindow.level = level }
+            observers = [NSWindow.didBecomeKeyNotification, NSApplication.didBecomeActiveNotification].map {
+                NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main, using: raise)
+            }
+            DispatchQueue.main.async { alertWindow.level = level }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let response = runModal()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        // A closed island declines key status, so this only returns to an open one.
+        if let island, island.isVisible { island.makeKey() }
+        return response
     }
 }

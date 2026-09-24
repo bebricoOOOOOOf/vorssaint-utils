@@ -28,7 +28,7 @@ enum AppFeature: String, CaseIterable {
     // Tools
     case quickLauncher, quickToggles, colorPicker, screenOCR, cleaningMode, mediaTools,
          cleaner, uninstaller, homebrew, appUpdates, screenshot, cameraPreview, radialMenu, scratchpad,
-         commandBar, screenRecorder, killProcess, portManager
+         commandBar, screenRecorder, wallpaper, killProcess, portManager
     // Dynamic Island, then its extensions
     case notch, notchCalendar, notchNotifications, notchGestures, notchTimer, notchAccessories, notchLyrics,
          notchQueue, notchLiveEqualizer, notchDownloads, notchAgents
@@ -80,7 +80,7 @@ extension AppFeature {
                     && !WindowEdgeSnapZone.enabledZones(
                         from: edgeSnapDisabledZones
                     ).isEmpty)
-        case .screenOCR, .cleaningMode, .screenshot, .commandBar, .screenRecorder:
+        case .screenOCR, .cleaningMode, .screenshot, .commandBar, .screenRecorder, .wallpaper:
             return false
         default:
             return true
@@ -112,7 +112,7 @@ extension AppFeature {
             return .energyDisplay
         case .quickLauncher, .quickToggles, .colorPicker, .screenOCR, .cleaningMode, .mediaTools,
              .cleaner, .uninstaller, .homebrew, .appUpdates, .screenshot, .cameraPreview, .radialMenu,
-             .scratchpad, .commandBar, .screenRecorder, .killProcess, .portManager:
+             .scratchpad, .commandBar, .screenRecorder, .wallpaper, .killProcess, .portManager:
             return .tools
         case .notch, .notchCalendar, .notchNotifications, .notchGestures, .notchTimer, .notchAccessories,
              .notchLyrics, .notchQueue, .notchLiveEqualizer, .notchDownloads, .notchAgents:
@@ -138,7 +138,7 @@ extension AppFeature {
         case .mouseAcceleration: return "cursorarrow.rays"
         case .mouseNavigation: return "arrow.left.arrow.right"
         case .mouseButtonShortcuts: return "button.programmable"
-        case .middleClick: return "computermouse"
+        case .middleClick: return "hand.tap"
         case .keyboardDebounce: return "keyboard"
         case .textSnippets: return "text.append"
         case .superKey:
@@ -175,6 +175,7 @@ extension AppFeature {
         case .screenshot: return "camera.viewfinder"
         case .screenRecorder: return "record.circle"
         case .cameraPreview: return "web.camera"
+        case .wallpaper: return "photo.on.rectangle"
         case .notchGestures: return "hand.draw"
         case .notchTimer: return "timer"
         case .notchAccessories: return "battery.25percent"
@@ -271,7 +272,7 @@ extension AppFeature {
         case .windowLayout, .diskImageInstaller, .mixer, .micMute, .keepAwake,
              .quickLauncher, .quickToggles, .colorPicker, .screenOCR, .cleaningMode, .mediaTools,
              .cleaner, .uninstaller, .homebrew, .appUpdates, .screenshot, .cameraPreview, .scratchpad,
-             .commandBar, .screenRecorder, .killProcess, .portManager,
+             .commandBar, .screenRecorder, .wallpaper, .killProcess, .portManager,
              .monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork, .monitorDisk, .monitorPower,
              .fanControl:
             return []
@@ -287,8 +288,8 @@ extension AppFeature {
         case .notchGestures: return []
         case .notchTimer, .notchAccessories: return []
         case .notchLyrics, .notchQueue: return []
-        // Session logs sit in the home folder, outside every protected
-        // location, and the optional account read asks the keychain itself.
+        // Session logs and the saved limits sit in the home folder, outside
+        // every protected location, and no sign-in or keychain item is used.
         case .notchAgents: return []
         // The bars read the player's own audio output, which macOS gates
         // behind the same permission the mixer and the recorder ask for.
@@ -334,7 +335,7 @@ extension AppFeature {
         case .clipboardHistory, .shelf, .urlCleaner,
              .soundOutputSwitcher,
              .extraBrightness, .bluetoothSleep, .quickLauncher, .colorPicker, .micMute, .mediaTools,
-             .scratchpad, .monitorGPU, .monitorNetwork, .fanControl, .killProcess, .portManager:
+             .scratchpad, .wallpaper, .monitorGPU, .monitorNetwork, .fanControl, .killProcess, .portManager:
             return []
         }
     }
@@ -370,7 +371,7 @@ extension AppFeature {
         Dictionary(uniqueKeysWithValues: allCases.map {
             ($0.availabilityKey,
              $0 != .focusFollowsMouse && $0 != .fanControl && $0 != .diskImageInstaller
-                && $0 != .killProcess && $0 != .scrollHorizontal && $0 != .portManager)
+                && $0 != .killProcess && $0 != .scrollHorizontal && $0 != .portManager && $0 != .wallpaper)
         })
     }
 
@@ -408,6 +409,9 @@ extension AppFeature {
                         && boolFor(DefaultsKey.brightnessControlEnabled))
                     || (boolFor(DefaultsKey.notchClipboardWindow) && isAvailable(.clipboardHistory))
             case (.radialMenu, .accessibility):
+                if let profiles = dataFor(DefaultsKey.radialMenuProfiles) {
+                    return RadialMenuSupport.needsAccessibility(RadialMenuSupport.decodeProfiles(profiles))
+                }
                 return RadialMenuSupport.needsAccessibility(
                     RadialMenuSupport.decode(dataFor(DefaultsKey.radialMenuItems)))
                     || RadialMenuMouseTrigger.sanitized(
