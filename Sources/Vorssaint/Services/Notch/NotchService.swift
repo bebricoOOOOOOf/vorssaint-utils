@@ -25,12 +25,19 @@ struct NotchNotice: Equatable {
         // Reserve enough for the widest percentage without giving the short
         // label the same oversized wing used by text notices.
         if level != nil, event != .accessory { return 80 }
-        // Battery labels need breathing room at both the curved edge and the
-        // camera. Long accessory names still use bounded truncation.
+        // Long accessory names still use bounded truncation.
         let maximum: CGFloat = event == .accessory && level == nil ? 160 : 240
-        let padding: CGFloat = event == .battery ? 32 : 16
-        return min(maximum, max(88, ceil(max(leading + 18 + 8, trailing)) + padding))
+        return min(maximum, max(88, ceil(max(leading + 18 + 8, trailing)) + 16 + cameraGap))
     }
+
+    /// Two lines of text sit at the island's two ends, each as far from its
+    /// curved edge, so a short one leaves its spare room beside the camera
+    /// rather than at one end. Levels and banners keep their own layout.
+    var readsFromEnds: Bool { level == nil && notification == nil }
+
+    /// Room text keeps from the camera; battery labels need breathing room
+    /// at both the curved edge and the camera.
+    var cameraGap: CGFloat { event == .battery ? 16 : readsFromEnds ? 6 : 0 }
 
     var accessibilityText: String {
         notification?.accessibilityText ?? [title, detail].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -102,6 +109,8 @@ final class NotchService: ObservableObject {
     private var inside = false
     private var hoverState = NotchHoverState()
     private var openedByHover = false
+    /// A click inside the open island, which may be what brings another app forward.
+    private var clickedSinceOpening = false
     private var trackingMenu = false
     private var fileInteractionActive = false
     private var keepsWorkingSurface: Bool {
@@ -128,6 +137,8 @@ final class NotchService: ObservableObject {
     private var volumeBaseline: Double?
     private var muteBaseline: Bool?
     private var volumeDeviceUID: String?
+    /// System uptime until which an output change counts as the island's own.
+    private var ownVolumeAdjustmentUntil: TimeInterval = 0
     private var notchNeedsMonitor = false
     private var menuSpaceTimer: Timer?
     private var menuSpaceReading = false
@@ -339,6 +350,9 @@ final class NotchService: ObservableObject {
         // feature must still cancel it before presentation resumes.
         NotchFileToolsService.shared.syncWithPreferences()
         if !NotchFileToolsService.shared.offersMediaDrop { endFileDrop() }
+        // Paused while the island is away, the section still stops at once
+        // when it is turned off.
+        if !NotchAgentSupport.isEnabled() { AgentUsageService.shared.stop() }
         guard !suspended else {
             if session.canRunTimer { NotchTimerService.shared.syncWithPreferences() }
             else { NotchTimerService.shared.suspend() }
@@ -397,6 +411,7 @@ final class NotchService: ObservableObject {
     func stop(restoreCapture: Bool = true) {
         NotchLyricsService.shared.stop()
         NotchFileToolsService.shared.stop()
+        AgentUsageService.shared.stop()
         guard running else { return }
         running = false
         NotchTimerService.shared.stop()
@@ -436,7 +451,7 @@ final class NotchService: ObservableObject {
         NotchDownloadService.shared.stop()
         NotchCalendarService.shared.stop()
         NotchNotificationService.shared.stop()
-        AgentUsageService.shared.stop()
+        AgentUsageService.shared.pause()
         settingsSignature = ""
         expanded = false
         peeking = false
@@ -1418,7 +1433,10 @@ final class NotchService: ObservableObject {
 
     private func syncMenuSpaceMonitoring() {
         guard !hiddenInFullscreen else { stopMenuSpaceMonitoring(); return }
-        if running, !suspended, NotchSupport.coversMenus() {
+        // Covering keeps activity on screen; a simulated cutout with nothing
+        // to show still gives way to the menus beneath it.
+        if running, !suspended, NotchSupport.coversMenus(),
+           geometry.isNotched || compactActivity != nil || idleContent != .none {
             // Nothing to measure: the island keeps the room an empty bar
             // would leave it, over whatever menus and status items are there.
             stopMenuSpaceMonitoring()
@@ -1575,13 +1593,22 @@ final class NotchService: ObservableObject {
             collapse()
         }
         // Space changes do not run a full preference sync. Restore volume
-        // key routing when the island becomes eligible for feedback again.
+        // and brightness key routing when the island becomes eligible for
+        // feedback again, and hand the keys back while it is away.
         if AppFeature.mixer.isAvailable { PreciseVolumeRollerService.shared.syncWithPreferences() }
+        if AppFeature.brightness.isAvailable { BrightnessService.shared.syncWithPreferences() }
     }
 
     private func fullscreenEnvironmentDidChange() {
-        guard running, !suspended else { return }
+        // Only the opt-in option depends on Spaces and the active app.
+        guard running, !suspended,
+              hiddenInFullscreen || UserDefaults.standard.bool(forKey: DefaultsKey.notchHideInFullscreen)
+        else { return }
+        let wasHidden = hiddenInFullscreen
         updateScreen()
+        // An unchanged state must not cut short a transition on screen, such
+        // as the island closing after a click in another app.
+        guard hiddenInFullscreen != wasHidden else { return }
         syncVisibleConsumers()
         refreshPresentation(animated: false)
     }
@@ -1643,7 +1670,11 @@ final class NotchService: ObservableObject {
         guard identifier != Bundle.main.bundleIdentifier, identifier != AssistiveKeyboard.bundleID else { return }
         panel?.resignKey()
         if expanded, modules.contains(.clipboard) { ClipboardHistoryService.shared.rememberPasteTarget() }
-        if expanded, !pinned, !keepsWorkingSurface, captureControls == nil { collapse() }
+        if expanded, !pinned, !keepsWorkingSurface, captureControls == nil,
+           NotchSupport.closesOnActivation(openedByHover: openedByHover, clicked: clickedSinceOpening,
+                                           pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true) {
+            collapse()
+        }
     }
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name,
@@ -1667,7 +1698,9 @@ final class NotchService: ObservableObject {
                 captureClose?()
                 clearCapture()
                 tearDownPresentation()
+                // The keys go back to the system while nothing can show them.
                 if AppFeature.mixer.isAvailable { PreciseVolumeRollerService.shared.syncWithPreferences() }
+                if AppFeature.brightness.isAvailable { BrightnessService.shared.syncWithPreferences() }
             }
         }
         // A dark display does not stop an alarm while the same user and Mac
@@ -1680,6 +1713,7 @@ final class NotchService: ObservableObject {
 
     private func installEventMonitors() {
         guard eventMonitors.isEmpty else { return }
+        clickedSinceOpening = false
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         if let token = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
             guard let self, !self.keepsWorkingSurface,
@@ -1731,8 +1765,9 @@ final class NotchService: ObservableObject {
                 self.collapse()
                 return nil
             }
-            if clicks.contains(NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue)),
-               event.window !== self.panel, !self.keepsWorkingSurface,
+            let click = clicks.contains(NSEvent.EventTypeMask(rawValue: 1 << event.type.rawValue))
+            if click, event.window === self.panel { self.clickedSinceOpening = true }
+            if click, event.window !== self.panel, !self.keepsWorkingSurface,
                self.windowHost?.contains(NSEvent.mouseLocation) != true,
                (NSApp.delegate as? AppDelegate)?.isOverStatusItem(NSEvent.mouseLocation) != true,
                !AssistiveKeyboard.ownsCocoaPoint(NSEvent.mouseLocation) { self.collapse() }
@@ -1959,6 +1994,13 @@ final class NotchService: ObservableObject {
         showVolume(volume, muted: mixer.systemOutputMuted)
     }
 
+    /// The island's own output controls already show the level they set.
+    /// Their changes, and the device's reading that follows, leave the open
+    /// header's title in place instead of covering it with the same level.
+    func noteOwnVolumeAdjustment() {
+        ownVolumeAdjustmentUntil = ProcessInfo.processInfo.systemUptime + 1
+    }
+
     private func bindVolumeEvents() {
         let mixer = AppVolumeMixer.shared
         volumeDeviceUID = mixer.currentOutputDeviceUID
@@ -1985,6 +2027,8 @@ final class NotchService: ObservableObject {
         defer { volumeBaseline = volume; muteBaseline = muted }
         guard volumeDeviceUID != nil, let volume, volumeBaseline != nil,
               volume != volumeBaseline || (muteBaseline != nil && muted != muteBaseline) else { return }
+        // Volume keys still announce themselves through showCurrentVolume.
+        guard !expanded || ProcessInfo.processInfo.systemUptime >= ownVolumeAdjustmentUntil else { return }
         showVolume(volume, muted: muted)
     }
 
