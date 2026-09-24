@@ -22,7 +22,13 @@ enum NotchFullscreenTests {
     }
     enum AppFeature {
         static let mixer = Feature()
+        static let brightness = Feature()
         struct Feature { let isAvailable = true }
+    }
+    final class BrightnessService {
+        static let shared = BrightnessService()
+        var syncs = 0
+        func syncWithPreferences() { syncs += 1 }
     }
     enum NotchSupport {
         enum Event { case volume }
@@ -97,15 +103,20 @@ enum NotchFullscreenTests {
         service.hoverWork = DispatchWorkItem {}
         service.noticeWork = DispatchWorkItem {}
         let hover = service.hoverWork!, notice = service.noticeWork!
+        let brightnessSyncs = BrightnessService.shared.syncs
         service.updateFullscreenVisibility(displayID: 2)
         suite.expect(service.hiddenInFullscreen && service.collapses == 1 && service.cancellations == 1
                      && !service.heldDrag && !service.dragPlaceholder && service.notice == nil
                      && hover.isCancelled && notice.isCancelled,
                      "entering fullscreen clears pending reveals, banners, drags and capture controls")
+        suite.expect(BrightnessService.shared.syncs == brightnessSyncs + 1,
+                     "entering fullscreen hands the brightness keys back to the system")
         service.updateFullscreenVisibility(displayID: 2)
-        suite.expect(service.collapses == 1, "unchanged fullscreen state does not repeat dismissal")
+        suite.expect(service.collapses == 1 && BrightnessService.shared.syncs == brightnessSyncs + 1,
+                     "unchanged fullscreen state does not repeat dismissal or key routing")
         service.updateFullscreenVisibility(displayID: 1)
-        suite.expect(!service.hiddenInFullscreen, "moving to a desktop display restores eligibility")
+        suite.expect(!service.hiddenInFullscreen && BrightnessService.shared.syncs == brightnessSyncs + 2,
+                     "moving to a desktop display restores eligibility and the island's brightness keys")
         service.updateFullscreenVisibility(displayID: 2)
         UserDefaults.standard.enabled = false
         service.updateFullscreenVisibility(displayID: 2)
@@ -115,11 +126,21 @@ enum NotchFullscreenTests {
         service.updateFullscreenVisibility(displayID: 2)
         suite.expect(!service.hiddenInFullscreen, "unavailable Space queries leave the island reachable")
         service.fullscreenEnvironmentDidChange()
-        suite.expect(service.screenUpdates == 1 && service.consumerSyncs == 1 && service.refreshes == 1,
-                     "Space changes reevaluate the display, consumers and presentation together")
+        suite.expect(service.screenUpdates == 1 && service.consumerSyncs == 0 && service.refreshes == 0,
+                     "an unchanged fullscreen state leaves consumers and a transition on screen alone")
+        service.screenUpdate = { [weak service] in service?.hiddenInFullscreen = true }
+        service.fullscreenEnvironmentDidChange()
+        suite.expect(service.screenUpdates == 2 && service.consumerSyncs == 1 && service.refreshes == 1,
+                     "a fullscreen change reevaluates the display, consumers and presentation together")
+        service.screenUpdate = nil
         service.suspended = true
         service.fullscreenEnvironmentDidChange()
-        suite.expect(service.refreshes == 1, "Space changes cannot reveal a locked or sleeping session")
+        suite.expect(service.screenUpdates == 2, "Space changes cannot reveal a locked or sleeping session")
+        UserDefaults.standard.enabled = false
+        let idle = Service()
+        idle.fullscreenEnvironmentDidChange()
+        suite.expect(idle.screenUpdates == 0 && idle.consumerSyncs == 0 && idle.refreshes == 0,
+                     "with the option off, app and Space changes do no fullscreen work")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.notchHideInFullscreen] as? Bool == false
                      && SettingsBackupSupport.exportKeys().contains(DefaultsKey.notchHideInFullscreen),
                      "fullscreen hiding is opt-in and included in settings backup")

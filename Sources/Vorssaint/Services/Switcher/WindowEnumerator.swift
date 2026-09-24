@@ -223,6 +223,7 @@ enum WindowEnumerator {
                                     resolveSource: (([SwitcherItem]) -> SwitcherItem?)? = nil,
                                     isCancelled: @escaping () -> Bool = { false }) -> WindowList {
         guard !isCancelled() else { return WindowList(items: [], sourceItems: []) }
+        let historyRevision = WindowUseTracker.shared.historyRevision
         let raw = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
 
         let ownPid = ProcessInfo.processInfo.processIdentifier
@@ -253,7 +254,7 @@ enum WindowEnumerator {
         WindowUseTracker.shared.reconcile(
             existingWindows: Set(raw.compactMap { $0[kCGWindowNumber as String] as? CGWindowID }),
             frontToBack: frontToBack,
-            running: Set(runningApps.map(\.pid)))
+            running: Set(runningApps.map(\.pid)), revision: historyRevision)
         var regularApps: [pid_t: String] = [:]
         var regularBundlePaths: [pid_t: String] = [:]
         for app in runningApps where app.isRegular {
@@ -500,7 +501,7 @@ enum WindowEnumerator {
                              appRules: appRules)
         let filtered = windows.filter { item in
             if !showFullscreenWindows, item.isFullscreen { return false }
-            if minimizedPlacement == .hidden, item.isMinimized { return false }
+            if minimizedPlacement == .hidden, item.isMinimizedOrAppHidden { return false }
             return true
         }
         let sourceItems = displayScope.map { _ in orderByUse(filtered, frontToBack: frontToBack) }
@@ -510,8 +511,8 @@ enum WindowEnumerator {
         let groupedBackingWindows = groupByApp && preservingGroupedWindows ? scoped : []
         var ordered: [SwitcherItem]
         if minimizedPlacement == .end {
-            let primary = scoped.filter { !$0.isMinimized }
-            let deferred = scoped.filter { $0.isMinimized }
+            let primary = scoped.filter { !$0.isMinimizedOrAppHidden }
+            let deferred = scoped.filter { $0.isMinimizedOrAppHidden }
             let orderedPrimary = orderByUse(primary, frontToBack: frontToBack)
             let orderedDeferred = orderByUse(deferred, frontToBack: frontToBack)
             let groupedPrimary = groupByApp ? SwitcherSupport.groupWindowsByApp(orderedPrimary) : orderedPrimary
@@ -524,8 +525,8 @@ enum WindowEnumerator {
         let backingOrdered: [SwitcherItem]
         if groupByApp, preservingGroupedWindows {
             if minimizedPlacement == .end {
-                let primary = groupedBackingWindows.filter { !$0.isMinimized }
-                let deferred = groupedBackingWindows.filter { $0.isMinimized }
+                let primary = groupedBackingWindows.filter { !$0.isMinimizedOrAppHidden }
+                let deferred = groupedBackingWindows.filter { $0.isMinimizedOrAppHidden }
                 backingOrdered = orderByUse(primary, frontToBack: frontToBack) + orderByUse(deferred, frontToBack: frontToBack)
             } else {
                 backingOrdered = orderByUse(groupedBackingWindows, frontToBack: frontToBack)
@@ -1002,10 +1003,7 @@ enum WindowEnumerator {
                                    frontToBack: WindowUseTracker.FrontToBack) -> [SwitcherItem] {
         let tracker = WindowUseTracker.shared
         let entries = windows.map { WindowUseOrder.Entry(windowID: $0.windowID, pid: $0.pid) }
-        return WindowUseOrder.order(entries,
-                                    windowHistory: tracker.windows,
-                                    appHistory: tracker.apps,
-                                    frontToBack: frontToBack.windows)
+        return tracker.order(entries, frontToBack: frontToBack.windows)
             .map { windows[$0] }
     }
 
