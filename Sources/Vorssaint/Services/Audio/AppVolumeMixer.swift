@@ -1734,7 +1734,7 @@ final class AppVolumeMixer: ObservableObject {
 
             var displayName = name
             if (transportType == kAudioDeviceTransportTypeAirPlay || MixerRoutingSupport.isAirPlayUID(uid)),
-               let speakerName = AirPlayRouteManager.shared.activeSpeakerName, !speakerName.isEmpty {
+               let speakerName = AirPlayRouteManager.shared.currentSpeakerName, !speakerName.isEmpty {
                 displayName = "\(speakerName) (AirPlay)"
             }
 
@@ -1755,10 +1755,10 @@ final class AppVolumeMixer: ObservableObject {
 
         if AirPlayRouteManager.shared.isAvailable && !devices.contains(where: { MixerRoutingSupport.isAirPlayUID($0.uid) }) {
             let airPlayName: String
-            if let active = AirPlayRouteManager.shared.activeSpeakerName, !active.isEmpty {
+            if let active = AirPlayRouteManager.shared.currentSpeakerName, !active.isEmpty {
                 airPlayName = "\(active) (AirPlay)"
             } else {
-                airPlayName = L10n.shared.s.mixerAirPlaySpeaker
+                airPlayName = "AirPlay"
             }
             devices.append(MixerOutputDevice(id: AirPlayRouteManager.airPlaySentinelUID,
                                              uid: AirPlayRouteManager.airPlaySentinelUID,
