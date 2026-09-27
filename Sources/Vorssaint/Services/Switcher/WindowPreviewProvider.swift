@@ -441,11 +441,11 @@ final class WindowPreviewProvider {
                   !Self.captureIsPaused
             else { return }
             self.pendingWarmPid = nil
-            let items = WindowEnumerator.listWindows(for: pid)
-            guard !items.isEmpty else { return }
             warmTask?.cancel()
             warmTask = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
+                let items = WindowEnumerator.listWindows(for: pid)
+                guard !items.isEmpty, !Task.isCancelled else { return }
                 for item in items {
                     guard !Task.isCancelled, let id = item.previewWindowID else { continue }
                     let captureIsPaused = await MainActor.run { Self.captureIsPaused }
