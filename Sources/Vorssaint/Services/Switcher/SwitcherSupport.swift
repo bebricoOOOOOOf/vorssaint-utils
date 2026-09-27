@@ -505,6 +505,19 @@ enum SwitcherSupport {
         iconRowLayout && !windowRow
     }
 
+    /// The shortcut can only bypass full enumeration when window history is
+    /// the complete candidate set. Grouped layouts skip sibling windows from
+    /// the foreground app, while enabled windowless entries require fallback.
+    static func quickFlickTargetIndex(pids: [pid_t],
+                                      frontmostPID: pid_t,
+                                      groupByApp: Bool,
+                                      windowlessApps: SwitcherWindowlessApps) -> Int? {
+        guard windowlessApps == .off else { return nil }
+        return pids.indices.dropFirst().first {
+            !groupByApp || pids[$0] != frontmostPID
+        }
+    }
+
     /// The grouped simple row still needs every backing window for its title
     /// chips and window shortcut, while its visible app cap remains grouped.
     static func preservesGroupedWindowsDuringEnumeration(allApps: Bool,

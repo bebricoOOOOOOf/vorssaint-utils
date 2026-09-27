@@ -141,8 +141,10 @@ enum WindowEnumerator {
     /// windows are ordinary visible surfaces. Any missing history entry or
     /// ambiguous window falls back to the full AX-backed enumeration.
     static func quickFlickItems(snapshot: Snapshot, frontmostPID: pid_t,
-                               byApp: Bool) -> (source: SwitcherItem, target: SwitcherItem,
-                                               history: [CGWindowID], revision: UUID)? {
+                               groupByApp: Bool,
+                               windowlessApps: SwitcherWindowlessApps)
+        -> (source: SwitcherItem, target: SwitcherItem,
+            history: [CGWindowID], revision: UUID)? {
         let revision = WindowUseTracker.shared.historyRevision
         let history = WindowUseTracker.shared.windows
         guard history.count >= 2 else { return nil }
@@ -167,7 +169,8 @@ enum WindowEnumerator {
                                height: (bounds["Height"] as? NSNumber)?.doubleValue ?? 0)
             guard frame.width >= minimumSize.width, frame.height >= minimumSize.height,
                   !frameLooksFullscreen(frame, screenFrames: snapshot.screenFrames),
-                  (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0
+                  (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0,
+                  !SpaceWindowBridge.isExcludedFromWindowCycle(id)
             else { continue }
             rawOrder.append(id)
             items.append(.window(id: id,
@@ -181,13 +184,19 @@ enum WindowEnumerator {
               source.windowID == history.first,
               rawOrder.first == source.windowID
         else { return nil }
-        let target = byApp ? ordered.first { $0.pid != frontmostPID } : ordered.dropFirst().first
-        guard let target, let targetID = target.windowID,
+        guard let targetIndex = SwitcherSupport.quickFlickTargetIndex(
+            pids: ordered.map(\.pid),
+            frontmostPID: frontmostPID,
+            groupByApp: groupByApp,
+            windowlessApps: windowlessApps)
+        else { return nil }
+        let target = ordered[targetIndex]
+        guard let targetID = target.windowID,
               let targetRank = history.firstIndex(of: targetID), targetRank > 0
         else { return nil }
         let visibleIDs = Set(items.compactMap(\.windowID))
         guard history.prefix(through: targetRank).allSatisfy({ visibleIDs.contains($0) }) else { return nil }
-        if byApp {
+        if groupByApp {
             let visiblePIDs = Set(items.map(\.pid))
             let appHistory = WindowUseTracker.shared.apps
             guard appHistory.first == frontmostPID,

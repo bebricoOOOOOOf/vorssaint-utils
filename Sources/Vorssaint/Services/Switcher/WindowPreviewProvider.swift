@@ -443,9 +443,12 @@ final class WindowPreviewProvider {
             self.pendingWarmPid = nil
             warmTask?.cancel()
             let snapshot = WindowEnumerator.snapshot()
+            let enumerationTask = Task.detached(priority: .utility) {
+                WindowEnumerator.listWindows(for: pid, snapshot: snapshot)
+            }
             warmTask = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
-                let items = WindowEnumerator.listWindows(for: pid, snapshot: snapshot)
+                let items = await enumerationTask.value
                 guard !items.isEmpty, !Task.isCancelled else { return }
                 for item in items {
                     guard !Task.isCancelled, let id = item.previewWindowID else { continue }

@@ -352,6 +352,24 @@ enum SwitcherModelFeatureTests {
                && SwitcherSupport.usesAppGroupsForMainShortcut(iconRowLayout: true,
                                                                 windowRow: false),
                "App Switcher main shortcut steps through simple window rows without app grouping")
+        suite.expect(SwitcherSupport.quickFlickTargetIndex(
+            pids: [1, 1, 2], frontmostPID: 1, groupByApp: true, windowlessApps: .off) == 2
+               && SwitcherSupport.quickFlickTargetIndex(
+                   pids: [1, 1, 2], frontmostPID: 1,
+                   groupByApp: false, windowlessApps: .off) == 1,
+               "quick flick follows the one-entry-per-app preference")
+        suite.expect(SwitcherSupport.quickFlickTargetIndex(
+            pids: [1, 2], frontmostPID: 1, groupByApp: true, windowlessApps: .finder) == nil
+               && SwitcherSupport.quickFlickTargetIndex(
+                   pids: [1, 2], frontmostPID: 1,
+                   groupByApp: true, windowlessApps: .all) == nil,
+               "quick flick falls back when a windowless app can precede its target")
+        let previewProviderCode = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/Switcher/WindowPreviewProvider.swift",
+            encoding: .utf8)) ?? ""
+        suite.expect(previewProviderCode.contains("let enumerationTask = Task.detached(priority: .utility)")
+               && previewProviderCode.contains("let items = await enumerationTask.value"),
+               "preview warming enumerates windows on an explicit worker")
         suite.expect(SwitcherSupport.preservesGroupedWindowsDuringEnumeration(allApps: true,
                                                                         mergeWindowsByApp: true,
                                                                         simpleMode: true)
@@ -1018,6 +1036,8 @@ enum SwitcherModelFeatureTests {
                && displayFilter!.lowerBound < grouping!.lowerBound
                && displayFilter!.lowerBound < entryCap!.lowerBound,
                "enumeration applies the display scope before grouping and capping the list")
+        suite.expect(enumeratorCode.contains("!SpaceWindowBridge.isExcludedFromWindowCycle(id)"),
+               "quick flick rejects window-server surfaces excluded from cycling")
         suite.expect(SwitcherSupport.sessionSourceItem(frontmostPID: 1, focusedWindowID: 1,
                                                  items: [onLeftDisplay, onRightDisplay])?.id == "left"
                && !localWindows.contains(where: { $0.id == "left" })

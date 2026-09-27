@@ -872,13 +872,16 @@ final class AppSwitcher: ObservableObject {
               let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         else { return }
         let snapshot = WindowEnumerator.snapshot()
-        let byApp = SwitcherSupport.usesAppGroupsForMainShortcut(
-            iconRowLayout: usesIconRowLayout, windowRow: usesWindowRow)
+        let windowlessApps = SwitcherWindowlessApps.mode(
+            storedValue: UserDefaults.standard.string(forKey: DefaultsKey.switcherWindowlessApps),
+            takeOverSystemShortcuts: false)
+        let groupByApp = UserDefaults.standard.bool(forKey: DefaultsKey.switcherMergeTabs)
         quickFlickQueue.async { [weak self] in
             guard let self,
                   let pair = WindowEnumerator.quickFlickItems(snapshot: snapshot,
                                                               frontmostPID: frontmostPID,
-                                                              byApp: byApp)
+                                                              groupByApp: groupByApp,
+                                                              windowlessApps: windowlessApps)
             else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
