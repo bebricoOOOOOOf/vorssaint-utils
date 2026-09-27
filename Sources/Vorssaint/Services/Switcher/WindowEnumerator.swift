@@ -137,6 +137,71 @@ enum WindowEnumerator {
                     snapshot: snapshot).items
     }
 
+    /// A quick modifier release can use already observed focus when both
+    /// windows are ordinary visible surfaces. Any missing history entry or
+    /// ambiguous window falls back to the full AX-backed enumeration.
+    static func quickFlickItems(snapshot: Snapshot, frontmostPID: pid_t,
+                               byApp: Bool) -> (source: SwitcherItem, target: SwitcherItem,
+                                               history: [CGWindowID], revision: UUID)? {
+        let revision = WindowUseTracker.shared.historyRevision
+        let history = WindowUseTracker.shared.windows
+        guard history.count >= 2 else { return nil }
+        let regularApps = Dictionary(uniqueKeysWithValues: snapshot.runningApps.compactMap { app -> (pid_t, String)? in
+            guard app.isRegular, !app.isHidden else { return nil }
+            return (app.pid, app.localizedName ?? "")
+        })
+        let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                             kCGNullWindowID) as? [[String: Any]] ?? []
+        var items: [SwitcherItem] = []
+        var rawOrder: [CGWindowID] = []
+        for info in raw {
+            guard (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let id = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let name = regularApps[pid],
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any]
+            else { continue }
+            let frame = CGRect(x: (bounds["X"] as? NSNumber)?.doubleValue ?? 0,
+                               y: (bounds["Y"] as? NSNumber)?.doubleValue ?? 0,
+                               width: (bounds["Width"] as? NSNumber)?.doubleValue ?? 0,
+                               height: (bounds["Height"] as? NSNumber)?.doubleValue ?? 0)
+            guard frame.width >= minimumSize.width, frame.height >= minimumSize.height,
+                  !frameLooksFullscreen(frame, screenFrames: snapshot.screenFrames),
+                  (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0
+            else { continue }
+            rawOrder.append(id)
+            items.append(.window(id: id,
+                                 title: info[kCGWindowName as String] as? String ?? "",
+                                 appName: name, pid: pid, isOnScreen: true, frame: frame))
+        }
+        guard !items.isEmpty else { return nil }
+        let entries = items.map { WindowUseOrder.Entry(windowID: $0.windowID, pid: $0.pid) }
+        let ordered = WindowUseTracker.shared.order(entries, frontToBack: rawOrder).map { items[$0] }
+        guard let source = ordered.first, source.pid == frontmostPID,
+              source.windowID == history.first,
+              rawOrder.first == source.windowID
+        else { return nil }
+        let target = byApp ? ordered.first { $0.pid != frontmostPID } : ordered.dropFirst().first
+        guard let target, let targetID = target.windowID,
+              let targetRank = history.firstIndex(of: targetID), targetRank > 0
+        else { return nil }
+        let visibleIDs = Set(items.compactMap(\.windowID))
+        guard history.prefix(through: targetRank).allSatisfy({ visibleIDs.contains($0) }) else { return nil }
+        if byApp {
+            let visiblePIDs = Set(items.map(\.pid))
+            let appHistory = WindowUseTracker.shared.apps
+            guard appHistory.first == frontmostPID,
+                  let rank = appHistory.firstIndex(of: target.pid),
+                  appHistory.prefix(through: rank).allSatisfy({ visiblePIDs.contains($0) })
+            else {
+                return nil
+            }
+        }
+        guard WindowUseTracker.shared.windows == history,
+              WindowUseTracker.shared.historyRevision == revision else { return nil }
+        return (source, target, history, revision)
+    }
+
     private static func listWindows(appRules: [String: SwitcherAppRule],
                                     groupByApp: Bool,
                                     preservingGroupedWindows: Bool,
@@ -193,6 +258,17 @@ enum WindowEnumerator {
     static func listWindows(for pid: pid_t, maximumCount: Int = 12,
                             currentSpaceOnly: Bool = false,
                             marksHiddenSpaces: Bool = false) -> [SwitcherItem] {
+        listWindows(for: pid, maximumCount: maximumCount,
+                    currentSpaceOnly: currentSpaceOnly,
+                    marksHiddenSpaces: marksHiddenSpaces,
+                    snapshot: snapshot())
+    }
+
+    /// The snapshot must be taken on main before a caller moves this walk off-main.
+    static func listWindows(for pid: pid_t, maximumCount: Int = 12,
+                            currentSpaceOnly: Bool = false,
+                            marksHiddenSpaces: Bool = false,
+                            snapshot: Snapshot) -> [SwitcherItem] {
         // An entry for the app itself belongs to the switcher alone. A
         // Dock preview is opened by pointing at one app's icon,
         // so a card naming that app says nothing the pointer did not, and
@@ -208,7 +284,7 @@ enum WindowEnumerator {
                     preservingGroupedWindows: false,
                     currentSpaceOnly: currentSpaceOnly,
                     marksHiddenSpaces: marksHiddenSpaces && !currentSpaceOnly,
-                    snapshot: snapshot()).items
+                    snapshot: snapshot).items
     }
 
     private static func listWindows(filterPID: pid_t?,

@@ -49,7 +49,7 @@ final class AppSwitcher: ObservableObject {
             cancelLetterConfirmation()
             updateIconRowLayoutForCurrentSelection()
             revealSelectedIconInVisibleRow()
-            if sessionActive, usesIconRowLayout {
+            if sessionActive, simpleModeEnabled, !usesWindowRow {
                 resizePanel(animated: !UserDefaults.standard.bool(forKey: DefaultsKey.switcherInstantSelection))
             }
         }
@@ -123,6 +123,8 @@ final class AppSwitcher: ObservableObject {
     /// away from the event tap on one serial queue.
     private let enumerationQueue = DispatchQueue(label: "com.vorssaint.switcher.enumeration",
                                                   qos: .userInitiated)
+    private let quickFlickQueue = DispatchQueue(label: "com.vorssaint.switcher.quick-flick",
+                                               qos: .userInteractive)
     private var pendingShow: DispatchWorkItem?
     /// True once the user moved the selection themselves.
     private var userNavigated = false
@@ -538,16 +540,24 @@ final class AppSwitcher: ObservableObject {
         if !active {
             guard canStartSession else { return Unmanaged.passUnretained(event) }
             if type == .flagsChanged {
+                var quickFlickGeneration: UInt64?
                 let stillInactive = routeLock.withLock { () -> Bool in
                     guard !routeSessionActive else { return false }
                     if var pending = routePendingSessionStart,
+                       !pending.commitWhenReady,
                        !pending.shortcut.requiredModifiersHeld(in: event.flags) {
                         // A quick flick still commits once enumeration finishes,
                         // but can never flash a panel after the key was released.
                         pending.commitWhenReady = true
                         routePendingSessionStart = pending
+                        quickFlickGeneration = pending.generation
                     }
                     return true
+                }
+                if let quickFlickGeneration {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.beginQuickFlick(generation: quickFlickGeneration)
+                    }
                 }
                 if stillInactive { return Unmanaged.passUnretained(event) }
                 var verdict: Unmanaged<CGEvent>?
@@ -845,6 +855,55 @@ final class AppSwitcher: ObservableObject {
     }
 
     // MARK: - Session lifecycle
+
+    private func beginQuickFlick(generation: UInt64) {
+        guard let pending = routeLock.withLock({ routePendingSessionStart }),
+              pending.generation == generation,
+              pending.commitWhenReady,
+              pending.scope == .allApps,
+              !pending.reversed,
+              pending.additionalNavigation == 0,
+              Permissions.shared.accessibility,
+              !UserDefaults.standard.bool(forKey: DefaultsKey.switcherCurrentSpaceOnly),
+              !UserDefaults.standard.bool(forKey: DefaultsKey.switcherCurrentDisplayOnly),
+              (UserDefaults.standard.string(forKey: DefaultsKey.switcherMinimizedPlacement) ?? "normal") == "normal",
+              !UserDefaults.standard.bool(forKey: DefaultsKey.switcherTakeOverSystemShortcuts),
+              UserDefaults.standard.dictionary(forKey: DefaultsKey.switcherAppRules)?.isEmpty != false,
+              let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        else { return }
+        let snapshot = WindowEnumerator.snapshot()
+        let byApp = SwitcherSupport.usesAppGroupsForMainShortcut(
+            iconRowLayout: usesIconRowLayout, windowRow: usesWindowRow)
+        quickFlickQueue.async { [weak self] in
+            guard let self,
+                  let pair = WindowEnumerator.quickFlickItems(snapshot: snapshot,
+                                                              frontmostPID: frontmostPID,
+                                                              byApp: byApp)
+            else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == frontmostPID,
+                      WindowUseTracker.shared.windows == pair.history,
+                      WindowUseTracker.shared.historyRevision == pair.revision,
+                      self.routeLock.withLock({ () -> Bool in
+                          guard let pending = self.routePendingSessionStart,
+                                pending.generation == generation,
+                                pending.commitWhenReady,
+                                pending.additionalNavigation == 0
+                          else { return false }
+                          self.routePendingSessionStart = nil
+                          return true
+                      })
+                else { return }
+                self.recordUse(pair.target, previous: pair.source.windowID)
+                WindowActivator.activate(pair.target,
+                                         sourcePID: pair.source.pid,
+                                         handoffSourcePID: frontmostPID,
+                                         sourceWindowID: pair.source.windowID,
+                                         sourceWindowOwnerPID: pair.source.windowOwnerPID)
+            }
+        }
+    }
 
     /// Runs only after the tap callback has returned. Window enumeration may
     /// wait on bounded AX calls, while modifier-up turns the pending result
