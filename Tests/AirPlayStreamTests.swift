@@ -164,3 +164,91 @@ enum AirPlayMixLimiterContract {
                      "a mix inside full scale passes through at its level")
     }
 }
+
+/// Each engine owns its lane in the AirPlay mix. A replacement starts before
+/// its predecessor stops, so ending the old lane must leave the new one alone.
+enum AirPlayStreamRegistryContract {
+    static func run(_ suite: TestSuite) {
+        let mixer = MixingAudioSource()
+        let registry = AirPlayStreamRegistry(mixer: mixer)
+        var emptied: [Bool] = []
+        func register(_ level: Float) -> AirPlayStreamRegistration {
+            let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 14)
+            [Float](repeating: level, count: 8_192 * 2)
+                .withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: 8_192, gain: 1) }
+            return registry.register(ring) { token in emptied.append(registry.remove(token)) }
+        }
+        func settledLevel() -> Int16 {
+            var output = [Int16](repeating: 0, count: 2_048 * 2)
+            output.withUnsafeMutableBufferPointer { mixer.readFrames(into: $0.baseAddress!, frameCount: 2_048) }
+            return output[2_047 * 2]
+        }
+
+        let previous = register(0.1)
+        let replacement = register(0.2)
+        previous.end()
+        suite.expect(emptied == [false] && abs(Int(settledLevel()) - Int(Int16(0.2 * 32_767))) <= 2,
+                     "stopping the previous engine keeps the replacement's stream playing")
+
+        previous.end()
+        suite.expect(emptied == [false], "a second stop (from deinit) changes nothing")
+
+        let discarded = register(0.3)
+        discarded.end()
+        suite.expect(emptied == [false, false] && abs(Int(settledLevel()) - Int(Int16(0.2 * 32_767))) <= 2,
+                     "a discarded build removes only its own stream")
+
+        replacement.end()
+        suite.expect(emptied == [false, false, true], "only the last live stream reports the mix as empty")
+    }
+}
+
+/// Stopping a renderer's feed waits for a running step, and no step starts
+/// afterwards, so a replacement renderer never shares the mix with it.
+enum AirPlayFeedDriverContract {
+    static func run(_ suite: TestSuite) {
+        let queue = DispatchQueue(label: "test.airplay.feed")
+        let driver = AirPlayFeedDriver(queue: queue, interval: .milliseconds(5))
+        let entered = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var steps = 0
+        var blockNext = true
+
+        driver.start {
+            lock.lock()
+            steps += 1
+            let block = blockNext
+            blockNext = false
+            lock.unlock()
+            if block {
+                entered.signal()
+                release.wait()
+            }
+        }
+        suite.expect(entered.wait(timeout: .now() + 2) == .success, "the feed step runs")
+
+        let stopped = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            driver.stop()
+            stopped.signal()
+        }
+        suite.expect(stopped.wait(timeout: .now() + 0.2) == .timedOut,
+                     "stop waits while a feed step is still running")
+        release.signal()
+        suite.expect(stopped.wait(timeout: .now() + 2) == .success, "stop returns once the step finished")
+
+        lock.lock(); let atStop = steps; lock.unlock()
+        Thread.sleep(forTimeInterval: 0.05)
+        lock.lock(); let later = steps; lock.unlock()
+        suite.expect(later == atStop, "no feed step runs after stop returned")
+
+        let selfStopping = AirPlayFeedDriver(queue: queue, interval: .milliseconds(5))
+        let finished = DispatchSemaphore(value: 0)
+        selfStopping.start {
+            selfStopping.stop()
+            finished.signal()
+        }
+        suite.expect(finished.wait(timeout: .now() + 2) == .success, "a step may stop its own driver without deadlocking")
+    }
+}

@@ -2354,6 +2354,8 @@ private final class AirPlayGainEngine: GainEngine {
     private var aggregateID: AudioObjectID = 0
     private var ioProc: AudioDeviceIOProcID?
     private let ringBuffer: AudioRingBuffer
+    /// This engine's own lane in the AirPlay mix; ended once, by this engine.
+    private var registration: AirPlayStreamRegistration?
 
     init?(appID: String, objects: [AudioObjectID], gain: Float, clockDeviceUID: String) {
         self.appID = appID
@@ -2420,14 +2422,16 @@ private final class AirPlayGainEngine: GainEngine {
         }
 
         guard AudioDeviceStart(aggregateID, ioProc) == noErr,
-              AirPlayRouteManager.shared.addAudioStream(key: appID, buffer: ringBuffer) else {
+              let registration = AirPlayRouteManager.shared.addAudioStream(buffer: ringBuffer) else {
             stop()
             return nil
         }
+        self.registration = registration
     }
 
     func stop() {
-        AirPlayRouteManager.shared.removeAudioStream(key: appID)
+        registration?.end()
+        registration = nil
         let aggregate = aggregateID
         let tap = tapID
         let proc = ioProc

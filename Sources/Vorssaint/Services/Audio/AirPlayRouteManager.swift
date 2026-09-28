@@ -271,25 +271,30 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
     private var airPlayRenderer: AirPlayRenderer?
     private let mixerSource = MixingAudioSource()
+    private lazy var streams = AirPlayStreamRegistry(mixer: mixerSource)
     private let streamLock = NSLock()
 
-    /// Adds an app's stream; false when no renderer could be started for it.
-    func addAudioStream(key: String, buffer: AudioRingBuffer) -> Bool {
+    /// Adds one engine's stream to the mix. The engine owns the returned
+    /// registration and ends it when it stops; nil when no renderer could be
+    /// started. Registrations are per engine, not per app: while a
+    /// replacement engine starts before its predecessor stops, both exist,
+    /// and ending the old one leaves the new one playing.
+    func addAudioStream(buffer: AudioRingBuffer) -> AirPlayStreamRegistration? {
         streamLock.lock()
         defer { streamLock.unlock() }
         startRendererIfNeeded()
-        guard airPlayRenderer != nil else { return false }
-        mixerSource.setBuffer(buffer, forKey: key)
-        return true
+        guard airPlayRenderer != nil else { return nil }
+        return streams.register(buffer) { [weak self] token in
+            self?.endAudioStream(token)
+        }
     }
 
-    func removeAudioStream(key: String) {
+    private func endAudioStream(_ token: Int) {
         streamLock.lock()
-        mixerSource.removeBuffer(forKey: key)
-        if mixerSource.isEmpty {
+        defer { streamLock.unlock() }
+        if streams.remove(token) {
             stopRenderer()
         }
-        streamLock.unlock()
     }
 
     private func startRendererIfNeeded() {
@@ -302,6 +307,119 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private func stopRenderer() {
         airPlayRenderer?.stop()
         airPlayRenderer = nil
+    }
+}
+
+// MARK: - Stream registrations
+
+/// Which engines currently feed the AirPlay mix. Every registration gets its
+/// own lane, so an engine can only ever remove what it added itself.
+final class AirPlayStreamRegistry: @unchecked Sendable {
+    private let mixer: MixingAudioSource
+    private let lock = NSLock()
+    private var nextToken = 0
+    private var live: Set<Int> = []
+
+    init(mixer: MixingAudioSource) {
+        self.mixer = mixer
+    }
+
+    func register(_ buffer: AudioRingBuffer, onEnd: @escaping (Int) -> Void) -> AirPlayStreamRegistration {
+        lock.lock()
+        nextToken += 1
+        let token = nextToken
+        live.insert(token)
+        lock.unlock()
+        mixer.setBuffer(buffer, forKey: Self.key(token))
+        return AirPlayStreamRegistration(token: token, onEnd: onEnd)
+    }
+
+    /// Removes one lane; true when that was the last live one. Removing a
+    /// lane that is already gone changes nothing and reports false.
+    func remove(_ token: Int) -> Bool {
+        lock.lock()
+        let removed = live.remove(token) != nil
+        let isEmpty = live.isEmpty
+        lock.unlock()
+        guard removed else { return false }
+        mixer.removeBuffer(forKey: Self.key(token))
+        return isEmpty
+    }
+
+    private static func key(_ token: Int) -> String { "stream-\(token)" }
+}
+
+/// One engine's place in the AirPlay mix. Ending it is idempotent, so a stop
+/// followed by the stop in `deinit` cannot touch anyone else's stream.
+final class AirPlayStreamRegistration: @unchecked Sendable {
+    let token: Int
+    private let lock = NSLock()
+    private var onEnd: ((Int) -> Void)?
+
+    init(token: Int, onEnd: @escaping (Int) -> Void) {
+        self.token = token
+        self.onEnd = onEnd
+    }
+
+    func end() {
+        lock.lock()
+        let pending = onEnd
+        onEnd = nil
+        lock.unlock()
+        pending?(token)
+    }
+}
+
+// MARK: - Feed scheduling
+
+/// Runs a renderer's feed steps. All renderers share one serial queue, so two
+/// of them never read the mixing source at once. `stop()` returns only after a
+/// step that is already running has finished, and no step starts afterwards.
+final class AirPlayFeedDriver: @unchecked Sendable {
+    static let sharedQueue = DispatchQueue(label: "com.vorssaint.utils.airplay.render", qos: .userInitiated)
+    private static let queueKey = DispatchSpecificKey<Void>()
+
+    private let queue: DispatchQueue
+    private let interval: DispatchTimeInterval
+    private let timerLock = NSLock()
+    private var timer: DispatchSourceTimer?
+    /// Read and written on `queue` only.
+    private var isActive = false
+
+    init(queue: DispatchQueue = AirPlayFeedDriver.sharedQueue, interval: DispatchTimeInterval = .milliseconds(25)) {
+        self.queue = queue
+        self.interval = interval
+        queue.setSpecific(key: Self.queueKey, value: ())
+    }
+
+    func start(_ step: @escaping () -> Void) {
+        queue.sync { isActive = true }
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now(), repeating: interval)
+        source.setEventHandler { [weak self] in
+            guard let self, self.isActive else { return }
+            step()
+        }
+        timerLock.lock()
+        timer?.cancel()
+        timer = source
+        timerLock.unlock()
+        source.resume()
+    }
+
+    func stop() {
+        timerLock.lock()
+        let source = timer
+        timer = nil
+        timerLock.unlock()
+        source?.cancel()
+        if DispatchQueue.getSpecific(key: Self.queueKey) != nil {
+            // Called from a step itself: it finishes on return.
+            isActive = false
+        } else {
+            // Waits for a running step; any step queued behind it sees the flag.
+            queue.sync { isActive = false }
+        }
     }
 }
 
@@ -512,7 +630,7 @@ final class AirPlayRenderer: @unchecked Sendable {
     private let source: MixingAudioSource
     private let renderer = AVSampleBufferAudioRenderer()
     private let synchronizer = AVSampleBufferRenderSynchronizer()
-    private let feedQueue = DispatchQueue(label: "com.vorssaint.utils.airplay.render", qos: .userInitiated)
+    private let feed = AirPlayFeedDriver()
 
     private let formatDescription: CMAudioFormatDescription
     private let sampleRate: Double = 44_100
@@ -544,32 +662,28 @@ final class AirPlayRenderer: @unchecked Sendable {
         synchronizer.addRenderer(renderer)
     }
 
-    private var feedTimer: DispatchSourceTimer?
-
     func start() {
         guard !started else { return }
         started = true
         nextPTS = CMTime.zero
 
         synchronizer.setRate(1.0, time: .zero)
-
-        let timer = DispatchSource.makeTimerSource(queue: feedQueue)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(25))
-        timer.setEventHandler { [weak self] in
+        feed.start { [weak self] in
             self?.provide()
         }
-        timer.resume()
-        self.feedTimer = timer
     }
 
+    /// Returns only once no feed step is running or can start again, so a
+    /// replacement renderer never reads the shared mix at the same time.
     func stop() {
         guard started else { return }
         started = false
-        feedTimer?.cancel()
-        feedTimer = nil
+        feed.stop()
         renderer.flush()
         synchronizer.rate = 0
     }
+
+    deinit { feed.stop() }
 
     private let targetLookahead = 0.75
 
