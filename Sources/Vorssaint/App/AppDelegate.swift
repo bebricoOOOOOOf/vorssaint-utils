@@ -1174,21 +1174,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
         popoverIsClosing = true
         if animated {
-            popover.close()
+            popover.performClose(nil)
         } else {
             popover.animates = false
             popover.close()
             popover.animates = true
-        }
-
-        // Safety watchdog: If popover remains shown or didClose never fired within 0.5s,
-        // clear popoverIsClosing so subsequent clicks or close requests are never blocked.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self else { return }
-            if self.popoverIsClosing && self.popover.isShown {
-                self.popoverIsClosing = false
-                self.popoverCloseIsAppRequested = false
-            }
         }
     }
 
