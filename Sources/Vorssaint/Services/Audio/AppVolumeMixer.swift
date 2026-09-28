@@ -2356,6 +2356,8 @@ private final class AirPlayGainEngine: GainEngine {
     private let ringBuffer: AudioRingBuffer
     /// This engine's own lane in the AirPlay mix; ended once, by this engine.
     private var registration: AirPlayStreamRegistration?
+    /// The ring, retained for the sample-rate listener while it is installed.
+    private var rateListenerClient: UnsafeMutableRawPointer?
 
     init?(appID: String, objects: [AudioObjectID], gain: Float, clockDeviceUID: String) {
         self.appID = appID
@@ -2424,6 +2426,10 @@ private final class AirPlayGainEngine: GainEngine {
             return nil
         }
 
+        // Installed only once there is something to keep current, so the
+        // failure paths above have nothing to undo.
+        startWatchingSampleRate()
+
         guard AudioDeviceStart(aggregateID, ioProc) == noErr,
               let registration = AirPlayRouteManager.shared.addAudioStream(appID: appID, buffer: ringBuffer) else {
             stop()
@@ -2432,15 +2438,40 @@ private final class AirPlayGainEngine: GainEngine {
         self.registration = registration
     }
 
+    /// Keeps the ring's rate current when the clock device renegotiates it
+    /// under the running tap, the same way the device engines follow it for
+    /// their limiter. A stale rate would play the app at the wrong speed.
+    private func startWatchingSampleRate() {
+        var address = TapGainEngine.nominalSampleRateAddress()
+        let client = Unmanaged.passRetained(ringBuffer).toOpaque()
+        guard AudioObjectAddPropertyListener(aggregateID, &address,
+                                             Self.sampleRateListener, client) == noErr else {
+            Unmanaged<AudioRingBuffer>.fromOpaque(client).release()
+            return
+        }
+        rateListenerClient = client
+    }
+
+    private static let sampleRateListener: AudioObjectPropertyListenerProc = { deviceID, _, _, client in
+        guard let client else { return noErr }
+        let ring = Unmanaged<AudioRingBuffer>.fromOpaque(client).takeUnretainedValue()
+        TapGainEngine.rateQueue.async {
+            ring.sampleRate = nominalSampleRate(of: deviceID)
+        }
+        return noErr
+    }
+
     func stop() {
         registration?.end()
         registration = nil
         let aggregate = aggregateID
         let tap = tapID
         let proc = ioProc
+        let listenerClient = rateListenerClient
         self.aggregateID = 0
         self.tapID = 0
         self.ioProc = nil
+        rateListenerClient = nil
 
         if let proc, aggregate != 0 {
             AudioDeviceStop(aggregate, proc)
@@ -2449,6 +2480,18 @@ private final class AirPlayGainEngine: GainEngine {
         // The same bounded queue as the device engines: a teardown parked in a
         // wedged HAL must not take the shared thread pool with it (issue #971).
         TapGainEngine.teardownQueue.addOperation {
+            if let listenerClient {
+                var mayRelease = aggregate == 0
+                if aggregate != 0 {
+                    var address = TapGainEngine.nominalSampleRateAddress()
+                    mayRelease = AudioObjectRemovePropertyListener(
+                        aggregate, &address, Self.sampleRateListener, listenerClient) == noErr
+                }
+                // A late callback is safer than reading a released ring.
+                if mayRelease {
+                    Unmanaged<AudioRingBuffer>.fromOpaque(listenerClient).release()
+                }
+            }
             if let proc, aggregate != 0 {
                 AudioDeviceDestroyIOProcID(aggregate, proc)
             }

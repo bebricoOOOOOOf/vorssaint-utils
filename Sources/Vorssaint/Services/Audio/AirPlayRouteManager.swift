@@ -459,22 +459,37 @@ final class AirPlayFeedDriver: @unchecked Sendable {
 /// Positions and samples live in manually allocated memory: the IO thread
 /// never goes through Swift array or property access.
 final class AudioRingBuffer: @unchecked Sendable {
-    let sampleRate: Double
     private let capacityFrames: Int
     private let storage: UnsafeMutablePointer<Float>
-    /// [0] = next frame to read (consumer), [1] = next frame to write (producer).
+    /// [0] = next frame to read (consumer), [1] = next frame to write
+    /// (producer), [2] = the bits of the current sample rate.
     private let positions: UnsafeMutablePointer<Int64>
 
     /// `startingFramePosition` exists for tests that exercise long-running streams.
     init(sampleRate: Double = 44_100, capacityFrames: Int = 1 << 16, startingFramePosition: Int64 = 0) {
-        self.sampleRate = sampleRate > 0 ? sampleRate : 44_100
         var cap = 1
         while cap < capacityFrames { cap <<= 1 }
         self.capacityFrames = cap
         storage = .allocate(capacity: cap * 2)
         storage.initialize(repeating: 0, count: cap * 2)
-        positions = .allocate(capacity: 2)
+        positions = .allocate(capacity: 3)
         positions.initialize(repeating: startingFramePosition, count: 2)
+        (positions + 2).initialize(to: Int64(bitPattern: (sampleRate > 0 ? sampleRate : 44_100).bitPattern))
+    }
+
+    /// The rate the producer writes at. The device can renegotiate it under a
+    /// running tap (a headset switching to a call), so the reader looks it up
+    /// on every read instead of keeping the value from build time.
+    var sampleRate: Double {
+        get { Double(bitPattern: UInt64(bitPattern: OSAtomicAdd64Barrier(0, positions + 2))) }
+        set {
+            guard newValue > 0, newValue.isFinite else { return }
+            let replacement = Int64(bitPattern: newValue.bitPattern)
+            while true {
+                let current = OSAtomicAdd64Barrier(0, positions + 2)
+                if OSAtomicCompareAndSwap64Barrier(current, replacement, positions + 2) { return }
+            }
+        }
     }
 
     deinit {

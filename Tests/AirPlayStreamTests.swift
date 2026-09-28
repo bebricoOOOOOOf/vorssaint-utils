@@ -299,3 +299,28 @@ enum AirPlayFeedDriverContract {
         suite.expect(finished.wait(timeout: .now() + 2) == .success, "a step may stop its own driver without deadlocking")
     }
 }
+
+/// The clock device can renegotiate its rate under a running tap (a headset
+/// taking a call). The AirPlay feed must follow the new rate at once, or the
+/// app plays at the wrong speed on the speaker.
+enum AirPlayRateChangeContract {
+    static func run(_ suite: TestSuite) {
+        let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 14)
+        // Each frame carries its own index, so the output shows which source
+        // frame it came from.
+        let ramp = (0..<8_192).flatMap { [Float($0), Float($0)] }
+        ramp.withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: 8_192, gain: 1) }
+        let resampler = LinearResampler(buffer: ring)
+        var output = [Float](repeating: 0, count: 1_024 * 2)
+
+        output.withUnsafeMutableBufferPointer { resampler.read(into: $0.baseAddress!, frameCount: 1_024) }
+        suite.expect(output[1_023 * 2] == 1_023, "at the feed's own rate every source frame is played once")
+
+        ring.sampleRate = 48_000
+        output.withUnsafeMutableBufferPointer { resampler.read(into: $0.baseAddress!, frameCount: 1_024) }
+        let expected = 1_024 + 1_023 * 48_000 / 44_100.0
+        suite.expect(abs(Double(output[1_023 * 2]) - expected) < 1,
+                     "after a rate change the feed consumes source frames at the new rate")
+        suite.expect(ring.sampleRate == 48_000, "the ring reports the renegotiated rate")
+    }
+}
