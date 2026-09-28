@@ -2422,7 +2422,7 @@ private final class AirPlayGainEngine: GainEngine {
         }
 
         guard AudioDeviceStart(aggregateID, ioProc) == noErr,
-              let registration = AirPlayRouteManager.shared.addAudioStream(buffer: ringBuffer) else {
+              let registration = AirPlayRouteManager.shared.addAudioStream(appID: appID, buffer: ringBuffer) else {
             stop()
             return nil
         }

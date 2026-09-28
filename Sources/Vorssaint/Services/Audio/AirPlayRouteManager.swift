@@ -276,15 +276,14 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
     /// Adds one engine's stream to the mix. The engine owns the returned
     /// registration and ends it when it stops; nil when no renderer could be
-    /// started. Registrations are per engine, not per app: while a
-    /// replacement engine starts before its predecessor stops, both exist,
-    /// and ending the old one leaves the new one playing.
-    func addAudioStream(buffer: AudioRingBuffer) -> AirPlayStreamRegistration? {
+    /// started. Each app is heard once, through its newest live engine, and
+    /// an engine can only ever end its own registration.
+    func addAudioStream(appID: String, buffer: AudioRingBuffer) -> AirPlayStreamRegistration? {
         streamLock.lock()
         defer { streamLock.unlock() }
         startRendererIfNeeded()
         guard airPlayRenderer != nil else { return nil }
-        return streams.register(buffer) { [weak self] token in
+        return streams.register(appID: appID, buffer: buffer) { [weak self] token in
             self?.endAudioStream(token)
         }
     }
@@ -312,41 +311,61 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
 // MARK: - Stream registrations
 
-/// Which engines currently feed the AirPlay mix. Every registration gets its
-/// own lane, so an engine can only ever remove what it added itself.
+/// Which engines currently feed the AirPlay mix. An app is heard once: its
+/// lane plays the newest live registration for that app. A replacement engine
+/// registers while it is still being built, before the old one is stopped, so
+/// it takes the lane over at once instead of adding a second copy; ending a
+/// registration removes only that registration, and if it was the one being
+/// heard (a discarded build) the lane falls back to the previous live one.
 final class AirPlayStreamRegistry: @unchecked Sendable {
+    private struct Entry {
+        let token: Int
+        let buffer: AudioRingBuffer
+    }
+
     private let mixer: MixingAudioSource
     private let lock = NSLock()
     private var nextToken = 0
-    private var live: Set<Int> = []
+    /// Per app, oldest first; the last entry is the audible one.
+    private var lanes: [String: [Entry]] = [:]
 
     init(mixer: MixingAudioSource) {
         self.mixer = mixer
     }
 
-    func register(_ buffer: AudioRingBuffer, onEnd: @escaping (Int) -> Void) -> AirPlayStreamRegistration {
+    func register(appID: String, buffer: AudioRingBuffer,
+                  onEnd: @escaping (Int) -> Void) -> AirPlayStreamRegistration {
         lock.lock()
+        defer { lock.unlock() }
         nextToken += 1
         let token = nextToken
-        live.insert(token)
-        lock.unlock()
-        mixer.setBuffer(buffer, forKey: Self.key(token))
+        lanes[appID, default: []].append(Entry(token: token, buffer: buffer))
+        // The mixer is updated under the same lock, so its lanes always match
+        // this bookkeeping even when registrations race.
+        mixer.setBuffer(buffer, forKey: appID)
         return AirPlayStreamRegistration(token: token, onEnd: onEnd)
     }
 
-    /// Removes one lane; true when that was the last live one. Removing a
-    /// lane that is already gone changes nothing and reports false.
+    /// Removes one registration; true when the mix has no lanes left.
+    /// Removing a registration that is already gone changes nothing and
+    /// reports false.
     func remove(_ token: Int) -> Bool {
         lock.lock()
-        let removed = live.remove(token) != nil
-        let isEmpty = live.isEmpty
-        lock.unlock()
-        guard removed else { return false }
-        mixer.removeBuffer(forKey: Self.key(token))
-        return isEmpty
+        defer { lock.unlock() }
+        guard let appID = lanes.first(where: { $0.value.contains { $0.token == token } })?.key,
+              var entries = lanes[appID],
+              let index = entries.firstIndex(where: { $0.token == token }) else { return false }
+        let wasAudible = index == entries.count - 1
+        entries.remove(at: index)
+        if let fallback = entries.last {
+            lanes[appID] = entries
+            if wasAudible { mixer.setBuffer(fallback.buffer, forKey: appID) }
+        } else {
+            lanes.removeValue(forKey: appID)
+            mixer.removeBuffer(forKey: appID)
+        }
+        return lanes.isEmpty
     }
-
-    private static func key(_ token: Int) -> String { "stream-\(token)" }
 }
 
 /// One engine's place in the AirPlay mix. Ending it is idempotent, so a stop

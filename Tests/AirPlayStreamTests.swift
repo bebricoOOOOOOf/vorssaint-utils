@@ -165,41 +165,49 @@ enum AirPlayMixLimiterContract {
     }
 }
 
-/// Each engine owns its lane in the AirPlay mix. A replacement starts before
-/// its predecessor stops, so ending the old lane must leave the new one alone.
+/// An app is heard once in the AirPlay mix, through its newest live engine.
+/// A replacement registers before its predecessor stops, so the mix must not
+/// carry both, and ending one engine must never remove another one's stream.
 enum AirPlayStreamRegistryContract {
     static func run(_ suite: TestSuite) {
         let mixer = MixingAudioSource()
         let registry = AirPlayStreamRegistry(mixer: mixer)
         var emptied: [Bool] = []
-        func register(_ level: Float) -> AirPlayStreamRegistration {
-            let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 14)
-            [Float](repeating: level, count: 8_192 * 2)
-                .withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: 8_192, gain: 1) }
-            return registry.register(ring) { token in emptied.append(registry.remove(token)) }
+        func register(_ appID: String, _ level: Float) -> AirPlayStreamRegistration {
+            let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 15)
+            [Float](repeating: level, count: 32_768 * 2)
+                .withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: 32_768, gain: 1) }
+            return registry.register(appID: appID, buffer: ring) { token in emptied.append(registry.remove(token)) }
         }
-        func settledLevel() -> Int16 {
+        func heard(_ level: Float) -> Bool {
             var output = [Int16](repeating: 0, count: 2_048 * 2)
             output.withUnsafeMutableBufferPointer { mixer.readFrames(into: $0.baseAddress!, frameCount: 2_048) }
-            return output[2_047 * 2]
+            return abs(Int(output[2_047 * 2]) - Int(Int16(level * 32_767))) <= 2
         }
 
-        let previous = register(0.1)
-        let replacement = register(0.2)
+        let previous = register("spotify", 0.1)
+        let replacement = register("spotify", 0.2)
+        suite.expect(heard(0.2),
+                     "while the previous engine still runs, the mix carries the app once, from the replacement")
+
         previous.end()
-        suite.expect(emptied == [false] && abs(Int(settledLevel()) - Int(Int16(0.2 * 32_767))) <= 2,
+        suite.expect(emptied == [false] && heard(0.2),
                      "stopping the previous engine keeps the replacement's stream playing")
-
         previous.end()
-        suite.expect(emptied == [false], "a second stop (from deinit) changes nothing")
+        suite.expect(emptied == [false] && heard(0.2), "a second stop (from deinit) changes nothing")
 
-        let discarded = register(0.3)
+        let discarded = register("spotify", 0.3)
         discarded.end()
-        suite.expect(emptied == [false, false] && abs(Int(settledLevel()) - Int(Int16(0.2 * 32_767))) <= 2,
-                     "a discarded build removes only its own stream")
+        suite.expect(emptied == [false, false] && heard(0.2),
+                     "a discarded build hands the app back to the engine that is still running")
+
+        let other = register("music", 0.05)
+        suite.expect(heard(0.25), "different apps are mixed together")
 
         replacement.end()
-        suite.expect(emptied == [false, false, true], "only the last live stream reports the mix as empty")
+        suite.expect(emptied == [false, false, false] && heard(0.05), "ending one app leaves the others")
+        other.end()
+        suite.expect(emptied == [false, false, false, true], "only the last live stream reports the mix as empty")
     }
 }
 
