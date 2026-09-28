@@ -516,8 +516,9 @@ enum SwitcherSupport {
         let windowRow = usesWindowRow(simpleMode: simpleMode,
                                       mergeWindowsByApp: mergeWindowsByApp,
                                       sessionScope: .allApps)
-        return usesAppGroupsForMainShortcut(iconRowLayout: iconRowLayout,
-                                            windowRow: windowRow)
+        return mergeWindowsByApp
+            || usesAppGroupsForMainShortcut(iconRowLayout: iconRowLayout,
+                                             windowRow: windowRow)
     }
 
     /// The shortcut can only bypass full enumeration when window history is
