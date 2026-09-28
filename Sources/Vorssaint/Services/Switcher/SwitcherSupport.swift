@@ -505,6 +505,21 @@ enum SwitcherSupport {
         iconRowLayout && !windowRow
     }
 
+    /// Quick release must follow the same layout grouping as normal selection:
+    /// classic icons always step by app, while the simple row follows its
+    /// one-entry-per-app preference.
+    static func quickFlickGroupsByApp(iconRowMode: Bool,
+                                      simpleMode: Bool,
+                                      mergeWindowsByApp: Bool) -> Bool {
+        let iconRowLayout = usesIconRowLayout(iconRowMode: iconRowMode,
+                                              simpleMode: simpleMode)
+        let windowRow = usesWindowRow(simpleMode: simpleMode,
+                                      mergeWindowsByApp: mergeWindowsByApp,
+                                      sessionScope: .allApps)
+        return usesAppGroupsForMainShortcut(iconRowLayout: iconRowLayout,
+                                            windowRow: windowRow)
+    }
+
     /// The shortcut can only bypass full enumeration when window history is
     /// the complete candidate set. Grouped layouts skip sibling windows from
     /// the foreground app, while enabled windowless entries require fallback.

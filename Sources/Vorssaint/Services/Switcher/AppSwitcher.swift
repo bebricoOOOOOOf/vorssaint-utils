@@ -875,7 +875,10 @@ final class AppSwitcher: ObservableObject {
         let windowlessApps = SwitcherWindowlessApps.mode(
             storedValue: UserDefaults.standard.string(forKey: DefaultsKey.switcherWindowlessApps),
             takeOverSystemShortcuts: false)
-        let groupByApp = UserDefaults.standard.bool(forKey: DefaultsKey.switcherMergeTabs)
+        let groupByApp = SwitcherSupport.quickFlickGroupsByApp(
+            iconRowMode: iconRowModeEnabled,
+            simpleMode: simpleModeEnabled,
+            mergeWindowsByApp: UserDefaults.standard.bool(forKey: DefaultsKey.switcherMergeTabs))
         quickFlickQueue.async { [weak self] in
             guard let self,
                   let pair = WindowEnumerator.quickFlickItems(snapshot: snapshot,

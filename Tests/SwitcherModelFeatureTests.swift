@@ -352,6 +352,19 @@ enum SwitcherModelFeatureTests {
                && SwitcherSupport.usesAppGroupsForMainShortcut(iconRowLayout: true,
                                                                 windowRow: false),
                "App Switcher main shortcut steps through simple window rows without app grouping")
+        let classicIconQuickGrouping = SwitcherSupport.quickFlickGroupsByApp(
+            iconRowMode: true, simpleMode: false, mergeWindowsByApp: false)
+        suite.expect(classicIconQuickGrouping
+               && SwitcherSupport.quickFlickTargetIndex(
+                   pids: [1, 1, 2], frontmostPID: 1,
+                   groupByApp: classicIconQuickGrouping, windowlessApps: .off) == 2
+               && !SwitcherSupport.quickFlickGroupsByApp(
+                   iconRowMode: false, simpleMode: false, mergeWindowsByApp: false)
+               && !SwitcherSupport.quickFlickGroupsByApp(
+                   iconRowMode: false, simpleMode: true, mergeWindowsByApp: false)
+               && SwitcherSupport.quickFlickGroupsByApp(
+                   iconRowMode: false, simpleMode: true, mergeWindowsByApp: true),
+               "quick flick preserves classic icon grouping when one-entry-per-app is off")
         suite.expect(SwitcherSupport.quickFlickTargetIndex(
             pids: [1, 1, 2], frontmostPID: 1, groupByApp: true, windowlessApps: .off) == 2
                && SwitcherSupport.quickFlickTargetIndex(
