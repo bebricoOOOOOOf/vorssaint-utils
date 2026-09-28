@@ -2181,7 +2181,7 @@ private final class TapGainEngine: GainEngine {
 
     /// Where the new rate is read, away from whatever thread the answer
     /// arrived on. Serial, so two changes in a row cannot land out of order.
-    private static let rateQueue = DispatchQueue(label: "com.vorssaint.utils.mixer.rate",
+    fileprivate static let rateQueue = DispatchQueue(label: "com.vorssaint.utils.mixer.rate",
                                                  qos: .userInitiated)
     /// How many teardowns may sit in the HAL at once. Operations past the
     /// bound wait in the queue holding no thread, so however often a wedged
@@ -2193,7 +2193,7 @@ private final class TapGainEngine: GainEngine {
     /// every later engine's aggregate and tap alive behind it, for as long as
     /// the app ran. Overlapping them lets the rest through, under the bound
     /// above so the parked ones cannot take the thread pool with them.
-    private static let teardownQueue: OperationQueue = {
+    fileprivate static let teardownQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.name = "com.vorssaint.utils.mixer.teardown"
         queue.qualityOfService = .utility
@@ -2217,7 +2217,7 @@ private final class TapGainEngine: GainEngine {
         return noErr
     }
 
-    private static func nominalSampleRateAddress() -> AudioObjectPropertyAddress {
+    fileprivate static func nominalSampleRateAddress() -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
                                    mScope: kAudioObjectPropertyScopeGlobal,
                                    mElement: kAudioObjectPropertyElementMain)
@@ -2384,6 +2384,7 @@ private final class AirPlayGainEngine: GainEngine {
         ]
         guard AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID) == noErr,
               aggregateID != 0 else {
+            // Not fully initialized yet, so no deinit follows: clean up here.
             AudioHardwareDestroyProcessTap(tapID)
             return nil
         }
@@ -2416,8 +2417,10 @@ private final class AirPlayGainEngine: GainEngine {
                 ring.write(frames: data, frameCount: frames, gain: currentGain)
             }
         }) == noErr else {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            AudioHardwareDestroyProcessTap(tapID)
+            // Fully initialized from here, so deinit calls stop() again; one
+            // stop() tears down once and leaves nothing for the second.
+            ioProc = nil
+            stop()
             return nil
         }
 
@@ -2443,7 +2446,9 @@ private final class AirPlayGainEngine: GainEngine {
             AudioDeviceStop(aggregate, proc)
         }
 
-        DispatchQueue.global(qos: .utility).async {
+        // The same bounded queue as the device engines: a teardown parked in a
+        // wedged HAL must not take the shared thread pool with it (issue #971).
+        TapGainEngine.teardownQueue.addOperation {
             if let proc, aggregate != 0 {
                 AudioDeviceDestroyIOProcID(aggregate, proc)
             }
