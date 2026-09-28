@@ -38,16 +38,13 @@ enum PopoverDismissSupport {
     }
 
     static func clickLandedInOwnWindow(at mouseLocation: CGPoint) -> Bool {
-        guard let mainHeight = NSScreen.screens.first?.frame.height,
-              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
-        else { return false }
-        let windows: [Window] = list.compactMap { info in
-            guard let number = info[kCGWindowNumber as String] as? Int,
-                  let owner = info[kCGWindowOwnerPID as String] as? Int,
-                  let boundsInfo = info[kCGWindowBounds as String] as? NSDictionary,
-                  let bounds = CGRect(dictionaryRepresentation: boundsInfo) else { return nil }
-            return Window(number: number, ownerPID: pid_t(owner), bounds: bounds,
-                          alpha: info[kCGWindowAlpha as String] as? Double ?? 1)
+        guard let mainHeight = NSScreen.screens.first?.frame.height else { return false }
+        let windows: [Window] = WindowServerSupport.onScreenWindowInfo().compactMap { info in
+            guard let number = (info[kCGWindowNumber as String] as? NSNumber)?.intValue,
+                  let owner = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let bounds = WindowServerSupport.bounds(from: info) else { return nil }
+            return Window(number: number, ownerPID: owner, bounds: bounds,
+                          alpha: (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1)
         }
         let clickThrough = Set(NSApplication.shared.windows.filter(\.ignoresMouseEvents).map(\.windowNumber))
         return clickLandedInOwnWindow(at: windowServerPoint(for: mouseLocation, mainDisplayHeight: mainHeight),
