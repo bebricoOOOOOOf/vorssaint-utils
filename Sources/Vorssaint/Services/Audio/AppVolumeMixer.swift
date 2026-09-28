@@ -799,10 +799,22 @@ final class AppVolumeMixer: ObservableObject {
         if MixerRoutingSupport.isAirPlaySentinel(targetOutputDeviceUID) {
             let clockUID = clockDeviceUIDForAirPlayTap()
             buildQueue.async { [weak self] in
+                // No renderer, no stream: the app stays on its current path
+                // instead of being tapped into silence, and this is not a
+                // missing permission, so the permission hint stays hidden.
+                guard AirPlayRouteManager.shared.prepareToStream() else {
+                    DispatchQueue.main.async {
+                        self?.finishUnavailableAirPlayBuild(for: app.id, token: token)
+                    }
+                    return
+                }
                 let engine = AirPlayGainEngine(appID: app.id,
                                                objects: app.audioObjects,
                                                gain: Float(app.volume),
                                                clockDeviceUID: clockUID)
+                if engine == nil {
+                    AirPlayRouteManager.shared.stopIfIdle()
+                }
                 DispatchQueue.main.async {
                     guard let self else {
                         engine?.stop()
@@ -826,6 +838,13 @@ final class AppVolumeMixer: ObservableObject {
                 self.install(engine, for: app.id, token: token)
             }
         }
+    }
+
+    /// An AirPlay build that could not get a renderer ends here, not in
+    /// `install`: whatever already plays the app keeps playing it, and the
+    /// permission hint (which `install` shows for a failed tap) stays hidden.
+    private func finishUnavailableAirPlayBuild(for id: String, token: Int) {
+        builds.finish(id, token: token)
     }
 
     private func clockDeviceUIDForAirPlayTap() -> String {

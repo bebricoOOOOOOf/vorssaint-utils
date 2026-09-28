@@ -288,6 +288,24 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         }
     }
 
+    /// Makes sure a renderer is running before an engine taps its app, so a
+    /// failure here never mutes the app or reads as a missing permission.
+    func prepareToStream() -> Bool {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        startRendererIfNeeded()
+        return airPlayRenderer != nil
+    }
+
+    /// Stops a renderer that a failed build started and nobody uses.
+    func stopIfIdle() {
+        streamLock.lock()
+        defer { streamLock.unlock() }
+        if streams.isEmpty {
+            stopRenderer()
+        }
+    }
+
     private func endAudioStream(_ token: Int) {
         streamLock.lock()
         defer { streamLock.unlock() }
@@ -346,6 +364,12 @@ final class AirPlayStreamRegistry: @unchecked Sendable {
         buffer.discardBuffered()
         mixer.setBuffer(buffer, forKey: appID)
         return AirPlayStreamRegistration(token: token, onEnd: onEnd)
+    }
+
+    var isEmpty: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return lanes.isEmpty
     }
 
     /// Removes one registration; true when the mix has no lanes left.
