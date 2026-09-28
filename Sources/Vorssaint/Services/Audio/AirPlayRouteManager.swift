@@ -117,7 +117,11 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         let sharedSys = sel_registerName("sharedSystemAudioContext")
         let defaultShared = sel_registerName("defaultSharedOutputContext")
 
-        if let ctx = (msgClass(cls, sharedSys) ?? msgClass(cls, defaultShared)) as? NSObject {
+        // Each class method only when this macOS still has it: sending one
+        // that is gone raises instead of returning nil.
+        let system = class_getClassMethod(cls, sharedSys) != nil ? msgClass(cls, sharedSys) : nil
+        let fallback = system == nil && class_getClassMethod(cls, defaultShared) != nil ? msgClass(cls, defaultShared) : nil
+        if let ctx = (system ?? fallback) as? NSObject {
             self.routingContext = ctx
         }
     }
@@ -129,7 +133,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         let msgObj = unsafeBitCast(sym, to: MsgSendObj.self)
         let setCtxSel = sel_registerName("setOutputContextID:")
 
-        if let ctxID = context.value(forKey: "ID") as? String, picker.responds(to: setCtxSel) {
+        if let ctxID = AirPlayPrivateAPI.string(context, "ID"), picker.responds(to: setCtxSel) {
             msgObj(picker, setCtxSel, ctxID as AnyObject)
         }
         picker.delegate = self
@@ -213,7 +217,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         if context.responds(to: outputDevicesSel),
            let devices = msgObjReturn(context, outputDevicesSel) as? [NSObject] {
             let names = devices.compactMap { dev -> String? in
-                guard let n = dev.value(forKey: "name") as? String, !n.isEmpty, !n.hasPrefix("APEndpoint") else {
+                guard let n = AirPlayPrivateAPI.string(dev, "name"), !n.isEmpty, !n.hasPrefix("APEndpoint") else {
                     return nil
                 }
                 return n
@@ -227,7 +231,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
             let outputDevSel = sel_registerName("outputDevice")
             if context.responds(to: outputDevSel),
                let dev = msgObjReturn(context, outputDevSel) as? NSObject,
-               let n = dev.value(forKey: "name") as? String,
+               let n = AirPlayPrivateAPI.string(dev, "name"),
                !n.isEmpty, !n.hasPrefix("APEndpoint") {
                 name = n
             }
@@ -324,6 +328,18 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private func stopRenderer() {
         airPlayRenderer?.stop()
         airPlayRenderer = nil
+    }
+}
+
+// MARK: - Private API access
+
+/// Reads from the private routing objects without trusting that this macOS
+/// still has the property: key-value coding raises for an unknown key, which
+/// would take the app down on the next poll instead of hiding AirPlay.
+enum AirPlayPrivateAPI {
+    static func string(_ object: NSObject, _ key: String) -> String? {
+        guard object.responds(to: NSSelectorFromString(key)) else { return nil }
+        return object.value(forKey: key) as? String
     }
 }
 

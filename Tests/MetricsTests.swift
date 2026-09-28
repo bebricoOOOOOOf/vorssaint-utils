@@ -44,6 +44,7 @@ struct MetricsTests {
                 AirPlayStreamRegistryContract.run(suite)
                 AirPlayFeedDriverContract.run(suite)
                 AirPlayRateChangeContract.run(suite)
+                AirPlayPrivateAPIContract.run(suite)
                 MixerInputVolumeContract.run(suite)
                 MixerPercentKeyTests.run(suite)
                 MixerFeatureTests.run(suite)

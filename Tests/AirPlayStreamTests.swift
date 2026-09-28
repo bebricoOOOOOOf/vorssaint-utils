@@ -324,3 +324,20 @@ enum AirPlayRateChangeContract {
         suite.expect(ring.sampleRate == 48_000, "the ring reports the renegotiated rate")
     }
 }
+
+/// The routing objects are private and may lose a property in a future macOS.
+/// Reading one that is gone must answer nil, not raise.
+enum AirPlayPrivateAPIContract {
+    private final class Device: NSObject {
+        @objc let name = "Games Room"
+    }
+
+    static func run(_ suite: TestSuite) {
+        suite.expect(AirPlayPrivateAPI.string(Device(), "name") == "Games Room",
+                     "a property that exists is read")
+        suite.expect(AirPlayPrivateAPI.string(Device(), "ID") == nil,
+                     "a property this object does not have answers nil instead of raising")
+        suite.expect(AirPlayPrivateAPI.string(NSObject(), "name") == nil,
+                     "an object without the key answers nil")
+    }
+}
