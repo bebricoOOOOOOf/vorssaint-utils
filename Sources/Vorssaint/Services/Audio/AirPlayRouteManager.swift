@@ -341,7 +341,9 @@ final class AirPlayStreamRegistry: @unchecked Sendable {
         let token = nextToken
         lanes[appID, default: []].append(Entry(token: token, buffer: buffer))
         // The mixer is updated under the same lock, so its lanes always match
-        // this bookkeeping even when registrations race.
+        // this bookkeeping even when registrations race. A buffer that becomes
+        // audible starts at its newest audio, never at a backlog.
+        buffer.discardBuffered()
         mixer.setBuffer(buffer, forKey: appID)
         return AirPlayStreamRegistration(token: token, onEnd: onEnd)
     }
@@ -359,7 +361,12 @@ final class AirPlayStreamRegistry: @unchecked Sendable {
         entries.remove(at: index)
         if let fallback = entries.last {
             lanes[appID] = entries
-            if wasAudible { mixer.setBuffer(fallback.buffer, forKey: appID) }
+            if wasAudible {
+                // Nobody read the fallback while it was hidden, so it is full
+                // of old audio; playing that would delay the app for good.
+                fallback.buffer.discardBuffered()
+                mixer.setBuffer(fallback.buffer, forKey: appID)
+            }
         } else {
             lanes.removeValue(forKey: appID)
             mixer.removeBuffer(forKey: appID)
@@ -493,6 +500,14 @@ final class AudioRingBuffer: @unchecked Sendable {
             storage[slot + 1] = frames[i * 2 + 1] * gain
         }
         _ = OSAtomicAdd64Barrier(Int64(count), tail)
+    }
+
+    /// Consumer: skips everything written so far, so the next read starts at
+    /// the newest audio. Only for a buffer no feed step is reading right now.
+    func discardBuffered() {
+        let h = OSAtomicAdd64Barrier(0, head)
+        let t = OSAtomicAdd64Barrier(0, tail)
+        if t > h { _ = OSAtomicAdd64Barrier(t - h, head) }
     }
 
     /// Consumer: Called from the AirPlay streaming feed queue.

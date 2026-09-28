@@ -169,45 +169,84 @@ enum AirPlayMixLimiterContract {
 /// A replacement registers before its predecessor stops, so the mix must not
 /// carry both, and ending one engine must never remove another one's stream.
 enum AirPlayStreamRegistryContract {
+    /// One engine: its ring and its registration. Engines keep writing after
+    /// they register, like a running tap.
+    private final class Engine {
+        let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 15)
+        var registration: AirPlayStreamRegistration!
+        func write(_ level: Float, frames: Int = 4_096) {
+            [Float](repeating: level, count: frames * 2)
+                .withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: frames, gain: 1) }
+        }
+    }
+
     static func run(_ suite: TestSuite) {
         let mixer = MixingAudioSource()
         let registry = AirPlayStreamRegistry(mixer: mixer)
         var emptied: [Bool] = []
-        func register(_ appID: String, _ level: Float) -> AirPlayStreamRegistration {
-            let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 15)
-            [Float](repeating: level, count: 32_768 * 2)
-                .withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: 32_768, gain: 1) }
-            return registry.register(appID: appID, buffer: ring) { token in emptied.append(registry.remove(token)) }
+        func start(_ appID: String) -> Engine {
+            let engine = Engine()
+            engine.registration = registry.register(appID: appID, buffer: engine.ring) { token in
+                emptied.append(registry.remove(token))
+            }
+            return engine
         }
+        /// Reads one block of the mix and answers whether it settled at `level`.
         func heard(_ level: Float) -> Bool {
             var output = [Int16](repeating: 0, count: 2_048 * 2)
             output.withUnsafeMutableBufferPointer { mixer.readFrames(into: $0.baseAddress!, frameCount: 2_048) }
             return abs(Int(output[2_047 * 2]) - Int(Int16(level * 32_767))) <= 2
         }
 
-        let previous = register("spotify", 0.1)
-        let replacement = register("spotify", 0.2)
+        let previous = start("spotify")
+        previous.write(0.1)
+        let replacement = start("spotify")
+        previous.write(0.1)
+        replacement.write(0.2)
         suite.expect(heard(0.2),
                      "while the previous engine still runs, the mix carries the app once, from the replacement")
 
-        previous.end()
+        previous.registration.end()
+        replacement.write(0.2)
         suite.expect(emptied == [false] && heard(0.2),
                      "stopping the previous engine keeps the replacement's stream playing")
-        previous.end()
+        previous.registration.end()
+        replacement.write(0.2)
         suite.expect(emptied == [false] && heard(0.2), "a second stop (from deinit) changes nothing")
 
-        let discarded = register("spotify", 0.3)
-        discarded.end()
+        let discarded = start("spotify")
+        discarded.write(0.3)
+        replacement.write(0.2)
+        discarded.registration.end()
+        replacement.write(0.2)
         suite.expect(emptied == [false, false] && heard(0.2),
                      "a discarded build hands the app back to the engine that is still running")
 
-        let other = register("music", 0.05)
+        // The engine heard again kept writing while hidden; the mix continues
+        // with what it writes from now on, not with that backlog.
+        let hidden = start("podcasts")
+        hidden.write(0.4)
+        replacement.write(0.2)
+        _ = heard(0.6)
+        let brief = start("podcasts")
+        hidden.write(0.4, frames: 16_384)
+        brief.registration.end()
+        hidden.write(0.5)
+        replacement.write(0.2)
+        suite.expect(heard(0.7), "a lane that falls back starts at new audio, not at its hidden backlog")
+        hidden.registration.end()
+
+        let other = start("music")
+        other.write(0.05)
+        replacement.write(0.2)
         suite.expect(heard(0.25), "different apps are mixed together")
 
-        replacement.end()
-        suite.expect(emptied == [false, false, false] && heard(0.05), "ending one app leaves the others")
-        other.end()
-        suite.expect(emptied == [false, false, false, true], "only the last live stream reports the mix as empty")
+        replacement.registration.end()
+        other.write(0.05)
+        suite.expect(emptied.last == false && heard(0.05), "ending one app leaves the others")
+        other.registration.end()
+        suite.expect(emptied.last == true && emptied.dropLast().allSatisfy { !$0 },
+                     "only the last live stream reports the mix as empty")
     }
 }
 
