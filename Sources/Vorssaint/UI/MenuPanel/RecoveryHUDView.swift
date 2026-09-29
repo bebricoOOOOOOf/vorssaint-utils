@@ -35,8 +35,10 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
     private var localMonitor: Any?
     private var screenObserver: NSObjectProtocol?
     private var isClosing: Bool = false
+    private let recoveryManager: DisplayRecoveryManager
 
     public init(recoveryManager: DisplayRecoveryManager = .shared, autoSubscribe: Bool = true) {
+        self.recoveryManager = recoveryManager
         if autoSubscribe {
             recoveryManager.$awaitingConfirmation
                 .receive(on: DispatchQueue.main)
@@ -71,15 +73,15 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
         guard !isVisible || panels.isEmpty else { return }
         isVisible = true
 
-        let screens = NSScreen.screens
-        guard !screens.isEmpty else {
-            close()
-            return
-        }
-
-        recreatePanels(screens: screens)
         startMonitoring()
         setupScreenObserver()
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else {
+            isVisible = false
+            closePanelsOnly()
+            return
+        }
+        recreatePanels(screens: screens)
     }
 
     public func close() {
@@ -105,7 +107,7 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
 
     private func frameForScreen(_ screen: NSScreen) -> NSRect {
         let width: CGFloat = 420
-        let height: CGFloat = 130
+        let height: CGFloat = 156
         let visible = screen.visibleFrame
         let x = visible.midX - width / 2
         let y = max(visible.minY + 10, visible.maxY - height - 28)
@@ -175,12 +177,14 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self, DisplayRecoveryManager.shared.awaitingConfirmation else { return }
+            guard let self = self, self.recoveryManager.awaitingConfirmation else { return }
             let screens = NSScreen.screens
             guard !screens.isEmpty else {
-                self.close()
+                self.isVisible = false
+                self.closePanelsOnly()
                 return
             }
+            self.isVisible = true
             if self.panels.count != screens.count {
                 self.recreatePanels(screens: screens)
             } else {
@@ -262,13 +266,13 @@ public struct RecoveryHUDView: View {
                 .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(l10n.s.recoveryCountdownTitle)
+                    Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryRestoreFailed : l10n.s.recoveryCountdownTitle)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if recoveryManager.hasRollbackFailure {
-                        Text("\(l10n.s.recoveryRevert) · Esc / \(l10n.s.recoveryKeep) · ↵")
+                        Text("\(l10n.s.recoveryRetry) · Esc / \(l10n.s.recoveryKeepCurrent) · ↵")
                             .font(.system(size: 11.5, weight: .regular))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
@@ -311,7 +315,7 @@ public struct RecoveryHUDView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(l10n.s.recoveryRevert)
+                        Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryRetry : l10n.s.recoveryRevert)
                         Text("Esc")
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 4)
@@ -333,7 +337,7 @@ public struct RecoveryHUDView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(l10n.s.recoveryKeep)
+                        Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryKeepCurrent : l10n.s.recoveryKeep)
                         Text("↵")
                             .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 4)
@@ -350,7 +354,7 @@ public struct RecoveryHUDView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
-        .frame(width: 420, height: 130)
+        .frame(width: 420, height: 156)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.regularMaterial)

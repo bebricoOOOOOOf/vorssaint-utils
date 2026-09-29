@@ -1278,6 +1278,9 @@ struct Strings {
     public let nativeHiDPI: String
     public let virtualHiDPI: String
     public let standardResolution: String
+    public let recoveryRestoreFailed: String
+    public let recoveryRetry: String
+    public let recoveryKeepCurrent: String
     public let recoveryKeep: String
     public let recoveryRevert: String
     public let recoveryCountdownTitle: String
@@ -2363,6 +2366,9 @@ extension Strings {
         nativeHiDPI: "HiDPI nativo",
         virtualHiDPI: "HiDPI virtual",
         standardResolution: "Resolução padrão (1x)",
+        recoveryRestoreFailed: "Não foi possível restaurar o modo HiDPI anterior.",
+        recoveryRetry: "Tentar novamente",
+        recoveryKeepCurrent: "Manter modo atual",
         recoveryKeep: "Manter alterações",
         recoveryRevert: "Reverter",
         recoveryCountdownTitle: "Confirmar ajustes de tela",
@@ -3449,6 +3455,9 @@ extension Strings {
         nativeHiDPI: "Native HiDPI",
         virtualHiDPI: "Virtual HiDPI",
         standardResolution: "Standard (1x)",
+        recoveryRestoreFailed: "The previous HiDPI mode could not be restored.",
+        recoveryRetry: "Try Again",
+        recoveryKeepCurrent: "Keep Current Mode",
         recoveryKeep: "Keep Changes",
         recoveryRevert: "Revert",
         recoveryCountdownTitle: "Confirm Display Settings",
