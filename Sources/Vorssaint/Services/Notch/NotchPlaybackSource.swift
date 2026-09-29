@@ -17,6 +17,9 @@ struct NotchPlaybackSource: Equatable {
     let isPlaying: Bool
     let hasTrack: Bool
     var displayName: String? = nil
+    /// Local Core Audio observation, not an adapter-provided media session.
+    var isAudioOnly = false
+    var applicationBundleIdentifier: String? = nil
 
     var selection: Selection { Selection(pid: pid, bundleIdentifier: bundleIdentifier) }
 
@@ -30,6 +33,7 @@ struct NotchPlaybackSource: Equatable {
         var value: [String: Any] = ["pid": pid, "bundleIdentifier": bundleIdentifier, "isMusicApp": isMusicApp,
                                    "isPlaying": isPlaying, "hasTrack": hasTrack]
         value["displayName"] = displayName
+        value["applicationBundleIdentifier"] = applicationBundleIdentifier
         return value
     }
 
@@ -53,7 +57,9 @@ struct NotchPlaybackSource: Equatable {
                   !sources.contains(where: { $0.pid == pid }) else { continue }
             let name = (entry["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             sources.append(Self(pid: pid, bundleIdentifier: bundle, isMusicApp: music, isPlaying: playing, hasTrack: track,
-                                displayName: name.flatMap { !$0.isEmpty && $0.utf8.count <= 256 ? $0 : nil }))
+                                displayName: name.flatMap { !$0.isEmpty && $0.utf8.count <= 256 ? $0 : nil },
+                                applicationBundleIdentifier: (entry["applicationBundleIdentifier"] as? String)
+                                    .flatMap { NotchPlaybackCommand.validIdentifier($0) ? $0 : nil }))
         }
         return sources.sorted { $0.pid < $1.pid }
     }
