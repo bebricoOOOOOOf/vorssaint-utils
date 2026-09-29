@@ -896,6 +896,15 @@ extension AirPlayRouteManager: AVRoutePickerViewDelegate {
             }
         }
         refreshActiveDevice()
+        // Choosing a speaker completes about a second after the picker closes.
+        // The context's notifications normally report it; a few bounded checks
+        // cover a connection that finishes without one. Only after the picker
+        // was used, so nothing runs while AirPlay sits unused.
+        for delay in [1.0, 2.5, 5.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.refreshActiveDevice()
+            }
+        }
         // Keep flag briefly active so any click that dismissed the picker does not simultaneously drop the panel
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             self?.isPresentingPicker = false
