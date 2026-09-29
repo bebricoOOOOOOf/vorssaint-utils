@@ -389,6 +389,12 @@ final class NotchMusicService: ObservableObject {
         artwork = nil
         artworkTint = nil
         commandFailed = false
+        // Output-only sources remain available even if the metadata adapter
+        // exits and exhausts its restart budget.
+        if wantsPlayback, !audioSources.isEmpty {
+            applyPresentation(Reading(playback: nil, artwork: nil, tint: nil,
+                                      sources: [], automatic: true, selectedPID: nil))
+        }
     }
 
     typealias Command = NotchPlaybackCommand
