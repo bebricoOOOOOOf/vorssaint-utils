@@ -254,6 +254,15 @@ enum MixerRoutingSupport {
         uid == AirPlayRouteManager.airPlaySentinelUID
     }
 
+    /// Whether a running engine's output is still there to render to. The
+    /// AirPlay entry stays listed while no speaker is picked, but an engine
+    /// streaming to it then only mutes its app, exactly like one whose
+    /// device was unplugged, so it counts as gone.
+    static func engineOutputIsPresent(_ uid: String, listedUIDs: [String], airPlayConnected: Bool) -> Bool {
+        guard listedUIDs.contains(uid) else { return false }
+        return !isAirPlaySentinel(uid) || airPlayConnected
+    }
+
     /// Whether an app's output menu needs its own "Output unavailable" row for
     /// the selected output. Only when that output is not listed anyway (an
     /// unplugged device): a listed one keeps its own row selected, since two

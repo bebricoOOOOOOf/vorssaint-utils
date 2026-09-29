@@ -873,7 +873,9 @@ final class AppVolumeMixer: ObservableObject {
             // running beats leaving the app with none, unless it renders to a
             // device that is gone, in which case it can only mute the app.
             if let running = engines[id],
-               !outputDevices.contains(where: { $0.uid == running.outputDeviceUID }) {
+               !MixerRoutingSupport.engineOutputIsPresent(running.outputDeviceUID,
+                                                          listedUIDs: outputDevices.map(\.uid),
+                                                          airPlayConnected: AirPlayRouteManager.isSpeakerConnected) {
                 discardEngine(for: id)
             }
             // A row that still has a tap running is plainly not being refused
@@ -1463,7 +1465,9 @@ final class AppVolumeMixer: ObservableObject {
             // An engine rendering to a device that is gone (headphones just
             // unplugged) can only mute the app, so it goes right away; every
             // other rebuild keeps its tap until the replacement is running.
-            if !outputDevices.contains(where: { $0.uid == engine.outputDeviceUID }) {
+            if !MixerRoutingSupport.engineOutputIsPresent(engine.outputDeviceUID,
+                                                          listedUIDs: outputDevices.map(\.uid),
+                                                          airPlayConnected: AirPlayRouteManager.isSpeakerConnected) {
                 engines.removeValue(forKey: id)?.stop()
                 engineRenderProgress.removeValue(forKey: id)
             }

@@ -101,6 +101,22 @@ enum AirPlayRouteContract {
 
         connection(suite, sentinel: sentinel)
         unavailableRow(suite, sentinel: sentinel)
+        engineOutput(suite, sentinel: sentinel)
+    }
+
+    /// An engine streaming to AirPlay while no speaker is picked can only mute
+    /// its app, so the mixer must treat its output as gone, like an unplugged
+    /// device, instead of keeping it until a replacement happens to succeed.
+    private static func engineOutput(_ suite: TestSuite, sentinel: String) {
+        let listed = ["BuiltInSpeakerDevice", "HeadsetOutput", sentinel]
+        suite.expect(!MixerRoutingSupport.engineOutputIsPresent(sentinel, listedUIDs: listed, airPlayConnected: false),
+                     "a listed AirPlay entry without a speaker counts as gone for a running engine")
+        suite.expect(MixerRoutingSupport.engineOutputIsPresent(sentinel, listedUIDs: listed, airPlayConnected: true),
+                     "with a speaker picked the AirPlay engine keeps running")
+        suite.expect(MixerRoutingSupport.engineOutputIsPresent("HeadsetOutput", listedUIDs: listed, airPlayConnected: false)
+                     && !MixerRoutingSupport.engineOutputIsPresent("UnpluggedHeadphones", listedUIDs: listed,
+                                                                   airPlayConnected: true),
+                     "other outputs count as present exactly while they are listed")
     }
 
     /// The AirPlay entry stays listed while no speaker is picked; the app's
