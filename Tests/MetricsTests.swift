@@ -192,4 +192,3 @@ struct MetricsTests {
         suite.finish()
     }
 }
-

@@ -2552,4 +2552,3 @@ private final class AirPlayGainEngine: GainEngine {
         return rate > 0 ? rate : 44_100
     }
 }
-
