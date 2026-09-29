@@ -23,7 +23,13 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     @Published private(set) var isAvailable: Bool = false
     @Published private(set) var isConnected: Bool = false
     @Published private(set) var activeSpeakerName: String?
-    @Published private(set) var isPresentingPicker: Bool = false
+    /// Main thread. Static so the panel's dismissal check can read them
+    /// without creating the manager, which loads the private routing stack:
+    /// a Vorssaint without the mixer must not pay for AirPlay at all.
+    private(set) static var isPresentingPicker = false
+    /// Whether an AirPlay picker was ever shown in this session. Only then
+    /// can an outside click belong to its out-of-process content.
+    private(set) static var hasPresentedPicker = false
 
     /// What the mixer's device refresh needs, readable from its HAL queue
     /// without creating the manager (which must happen on the main thread).
@@ -963,7 +969,8 @@ extension AirPlayRouteManager: AVRoutePickerViewDelegate {
     func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
         // Picking again is a fresh try at streaming.
         streamingFailedFor = nil
-        self.isPresentingPicker = true
+        Self.isPresentingPicker = true
+        Self.hasPresentedPicker = true
     }
 
     func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
@@ -987,8 +994,8 @@ extension AirPlayRouteManager: AVRoutePickerViewDelegate {
             }
         }
         // Keep flag briefly active so any click that dismissed the picker does not simultaneously drop the panel
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.isPresentingPicker = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            Self.isPresentingPicker = false
         }
     }
 }
