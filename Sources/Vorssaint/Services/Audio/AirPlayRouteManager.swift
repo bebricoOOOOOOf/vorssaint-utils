@@ -191,6 +191,8 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     /// Programmatically opens the system route picker anchored to the active picker view,
     /// or anchors an invisible transient popup at the mouse cursor if no UI picker is currently mounted.
     func presentPicker() {
+        // Nothing to pick with, and no reason to create the anchor window.
+        guard isAvailable else { return }
         if let picker = visibleHeaderPicker, let button = findButton(in: picker) {
             button.performClick(nil)
             return
