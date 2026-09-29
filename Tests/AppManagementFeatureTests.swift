@@ -1270,6 +1270,14 @@ enum AppManagementFeatureTests {
                && !AutoQuitSupport.shouldInspectExternalFocusedApplication(
                    hostPID: 0, frontmostPID: 0, focusedPID: 20),
                "foreign dialogs are not associated when another app is frontmost or process ids are invalid")
+        suite.expect(AutoQuitSupport.associatedTransientInteractionBlocksQuit(
+            role: "AXWindow", subrole: "AXDialog")
+            && AutoQuitSupport.associatedTransientInteractionBlocksQuit(role: "AXSheet", subrole: nil),
+               "an associated live file panel blocks quit after focus moves to another app")
+        suite.expect(!AutoQuitSupport.associatedTransientInteractionBlocksQuit(role: nil, subrole: "AXDialog")
+            && !AutoQuitSupport.associatedTransientInteractionBlocksQuit(role: "AXWindow", subrole: "AXSystemDialog")
+            && !AutoQuitSupport.associatedTransientInteractionBlocksQuit(role: "AXWindow", subrole: "AXFloatingWindow"),
+               "destroyed elements, system dialogs and unrelated palettes cannot retain a panel association")
         let autoQuitServiceSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/AutoQuit/AutoQuitService.swift",
             encoding: .utf8)) ?? ""

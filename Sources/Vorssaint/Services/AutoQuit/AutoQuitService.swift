@@ -727,7 +727,14 @@ final class AutoQuitService: ObservableObject {
         // with it after the user switches apps; its destroy event still needs
         // to trigger a host check.
         for (key, windows) in transientWindows where key.hostPID == hostPID {
-            if windows.contains(where: { !Self.isStandardWindow($0) && Self.isQuitBlockingTransientWindow($0) }) {
+            if windows.contains(where: { window in
+                var subroleValue: CFTypeRef?
+                let subrole = AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString,
+                                                           &subroleValue) == .success
+                    ? subroleValue as? String : nil
+                return AutoQuitSupport.associatedTransientInteractionBlocksQuit(
+                    role: Self.role(of: window), subrole: subrole)
+            }) {
                 return true
             }
         }

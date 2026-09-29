@@ -99,6 +99,13 @@ enum AutoQuitSupport {
         hostPID > 0 && frontmostPID == hostPID && focusedPID > 0 && focusedPID != hostPID
     }
 
+    /// Once a live panel is associated with its client, changing focus must
+    /// not make that client eligible for quit. Invalid/destroyed AX elements
+    /// have no readable role; their association ends at the destroy event.
+    static func associatedTransientInteractionBlocksQuit(role: String?, subrole: String?) -> Bool {
+        role == "AXSheet" || (role == "AXWindow" && subrole == "AXDialog")
+    }
+
     static func shouldQuitAfterWindowCheck(hadWindows: Bool,
                                            appIsTerminated: Bool,
                                            appIsExcepted: Bool,
