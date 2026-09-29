@@ -391,6 +391,16 @@ enum AirPlayAvailabilityContract {
         suite.expect(!available(id: nil) && !available(id: ""), "not when the context id cannot be read")
         suite.expect(!available(picker: false), "not when the picker cannot be bound to the context")
         suite.expect(!available(renderer: false), "not when the renderer cannot be bound to the context")
+
+        suite.expect(AirPlayAvailability.isConnected(hasDevice: true, speakerName: "Speaker", failedSpeakerName: nil),
+                     "a picked speaker with a name counts as connected")
+        suite.expect(!AirPlayAvailability.isConnected(hasDevice: true, speakerName: "Speaker", failedSpeakerName: "Speaker"),
+                     "the speaker streaming just failed for does not, so apps show unavailable instead of claiming AirPlay")
+        suite.expect(AirPlayAvailability.isConnected(hasDevice: true, speakerName: "Other", failedSpeakerName: "Speaker"),
+                     "picking another speaker is a fresh try")
+        suite.expect(!AirPlayAvailability.isConnected(hasDevice: false, speakerName: "Speaker", failedSpeakerName: nil)
+                     && !AirPlayAvailability.isConnected(hasDevice: true, speakerName: nil, failedSpeakerName: nil),
+                     "no device or no name is not connected")
     }
 }
 

@@ -271,7 +271,8 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
         let outputDevSel = sel_registerName("outputDevice")
         let hasDevice = context.responds(to: outputDevSel) && msgObjReturn(context, outputDevSel) != nil
-        let connected = hasDevice && name != nil
+        let connected = AirPlayAvailability.isConnected(hasDevice: hasDevice, speakerName: name,
+                                                        failedSpeakerName: streamingFailedFor)
 
         let connectedChanged = cachedIsConnected != connected
         let nameChanged = cachedSpeakerName != name
@@ -345,6 +346,19 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         }
     }
 
+    /// The speaker a renderer could not be started for. While it is still the
+    /// picked one, AirPlay reports no connection: routed apps fall back to the
+    /// Mac and show as unavailable instead of claiming AirPlay while playing
+    /// locally, and builds stop being retried. Picking again clears it.
+    private var streamingFailedFor: String?
+
+    /// Main thread: a build could not get a renderer.
+    func reportStreamingFailure() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        streamingFailedFor = cachedSpeakerName ?? ""
+        refreshActiveDevice()
+    }
+
     /// Makes sure a renderer is running before an engine taps its app, so a
     /// failure here never mutes the app or reads as a missing permission.
     func prepareToStream() -> Bool {
@@ -404,6 +418,13 @@ enum AirPlayPrivateAPI {
 /// context setter the picker falls back to the whole Mac's route, and without
 /// the renderer binding the stream would play on the Mac.
 enum AirPlayAvailability {
+    /// A speaker counts as connected when the context has one with a name,
+    /// unless streaming to that very speaker just failed.
+    static func isConnected(hasDevice: Bool, speakerName: String?, failedSpeakerName: String?) -> Bool {
+        guard hasDevice, let speakerName else { return false }
+        return speakerName != failedSpeakerName
+    }
+
     static func isAvailable(mixerSupported: Bool, hasContext: Bool, contextID: String?,
                             pickerCanBind: Bool, rendererCanBind: Bool) -> Bool {
         mixerSupported && hasContext && !(contextID?.isEmpty ?? true) && pickerCanBind && rendererCanBind
@@ -940,6 +961,8 @@ final class AirPlayRenderer: @unchecked Sendable {
 
 extension AirPlayRouteManager: AVRoutePickerViewDelegate {
     func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        // Picking again is a fresh try at streaming.
+        streamingFailedFor = nil
         self.isPresentingPicker = true
     }
 

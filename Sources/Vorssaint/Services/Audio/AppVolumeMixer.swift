@@ -845,6 +845,8 @@ final class AppVolumeMixer: ObservableObject {
     /// permission hint (which `install` shows for a failed tap) stays hidden.
     private func finishUnavailableAirPlayBuild(for id: String, token: Int) {
         builds.finish(id, token: token)
+        // Shown as unavailable from now on, and not retried on every pass.
+        AirPlayRouteManager.shared.reportStreamingFailure()
     }
 
     private func clockDeviceUIDForAirPlayTap() -> String {
