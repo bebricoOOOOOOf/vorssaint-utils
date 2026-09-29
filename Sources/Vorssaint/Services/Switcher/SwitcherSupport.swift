@@ -564,35 +564,6 @@ enum SwitcherSupport {
         iconRowLayout && !windowRow
     }
 
-    /// Quick release must follow the same layout grouping as normal selection:
-    /// classic icons always step by app, while the simple row follows its
-    /// one-entry-per-app preference.
-    static func quickFlickGroupsByApp(iconRowMode: Bool,
-                                      simpleMode: Bool,
-                                      mergeWindowsByApp: Bool) -> Bool {
-        let iconRowLayout = usesIconRowLayout(iconRowMode: iconRowMode,
-                                              simpleMode: simpleMode)
-        let windowRow = usesWindowRow(simpleMode: simpleMode,
-                                      mergeWindowsByApp: mergeWindowsByApp,
-                                      sessionScope: .allApps)
-        return mergeWindowsByApp
-            || usesAppGroupsForMainShortcut(iconRowLayout: iconRowLayout,
-                                             windowRow: windowRow)
-    }
-
-    /// The shortcut can only bypass full enumeration when window history is
-    /// the complete candidate set. Grouped layouts skip sibling windows from
-    /// the foreground app, while enabled windowless entries require fallback.
-    static func quickFlickTargetIndex(pids: [pid_t],
-                                      frontmostPID: pid_t,
-                                      groupByApp: Bool,
-                                      windowlessApps: SwitcherWindowlessApps) -> Int? {
-        guard windowlessApps == .off else { return nil }
-        return pids.indices.dropFirst().first {
-            !groupByApp || pids[$0] != frontmostPID
-        }
-    }
-
     /// The grouped simple row still needs every backing window for its title
     /// chips and window shortcut, while its visible app cap remains grouped.
     static func preservesGroupedWindowsDuringEnumeration(allApps: Bool,

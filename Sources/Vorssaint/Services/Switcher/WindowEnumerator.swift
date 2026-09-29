@@ -68,8 +68,8 @@ enum WindowEnumerator {
         return queue
     }()
     /// Ceiling on the whole batch. The Switcher waits on its serial session
-    /// queue, which must stay bounded for later shortcuts. The six synchronous
-    /// `listWindows(for:)` Dock and preview callers still run on main, so this
+    /// queue, which must stay bounded for later shortcuts. The five synchronous
+    /// `listWindows(for:)` Dock and switcher callers still run on main, so this
     /// bound also prevents their walks from stalling main and the event taps
     /// (issues #971 and #189).
     private static let accessibilityBatchBudget: TimeInterval = 5.0
@@ -135,80 +135,6 @@ enum WindowEnumerator {
         listWindows(appRules: [:], groupByApp: false,
                     preservingGroupedWindows: false, marksHiddenSpaces: false,
                     snapshot: snapshot).items
-    }
-
-    /// A quick modifier release can use already observed focus when both
-    /// windows are ordinary visible surfaces. Any missing history entry or
-    /// ambiguous window falls back to the full AX-backed enumeration.
-    static func quickFlickItems(snapshot: Snapshot, frontmostPID: pid_t,
-                               groupByApp: Bool,
-                               windowlessApps: SwitcherWindowlessApps)
-        -> (source: SwitcherItem, target: SwitcherItem,
-            history: [CGWindowID], revision: UUID)? {
-        let revision = WindowUseTracker.shared.historyRevision
-        let history = WindowUseTracker.shared.windows
-        guard history.count >= 2 else { return nil }
-        let regularApps = Dictionary(uniqueKeysWithValues: snapshot.runningApps.compactMap { app -> (pid_t, String)? in
-            guard app.isRegular, !app.isHidden else { return nil }
-            return (app.pid, app.localizedName ?? "")
-        })
-        let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
-                                             kCGNullWindowID) as? [[String: Any]] ?? []
-        var items: [SwitcherItem] = []
-        var rawOrder: [CGWindowID] = []
-        for info in raw {
-            guard (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  let id = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
-                  let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-                  let name = regularApps[pid],
-                  let bounds = info[kCGWindowBounds as String] as? [String: Any]
-            else { continue }
-            let frame = CGRect(x: (bounds["X"] as? NSNumber)?.doubleValue ?? 0,
-                               y: (bounds["Y"] as? NSNumber)?.doubleValue ?? 0,
-                               width: (bounds["Width"] as? NSNumber)?.doubleValue ?? 0,
-                               height: (bounds["Height"] as? NSNumber)?.doubleValue ?? 0)
-            guard frame.width >= minimumSize.width, frame.height >= minimumSize.height,
-                  !frameLooksFullscreen(frame, screenFrames: snapshot.screenFrames),
-                  (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue != 0,
-                  !SpaceWindowBridge.isExcludedFromWindowCycle(id)
-            else { continue }
-            rawOrder.append(id)
-            items.append(.window(id: id,
-                                 title: info[kCGWindowName as String] as? String ?? "",
-                                 appName: name, pid: pid, isOnScreen: true, frame: frame))
-        }
-        guard !items.isEmpty else { return nil }
-        let entries = items.map { WindowUseOrder.Entry(windowID: $0.windowID, pid: $0.pid) }
-        let ordered = WindowUseTracker.shared.order(entries, frontToBack: rawOrder).map { items[$0] }
-        guard let source = ordered.first, source.pid == frontmostPID,
-              source.windowID == history.first,
-              rawOrder.first == source.windowID
-        else { return nil }
-        guard let targetIndex = SwitcherSupport.quickFlickTargetIndex(
-            pids: ordered.map(\.pid),
-            frontmostPID: frontmostPID,
-            groupByApp: groupByApp,
-            windowlessApps: windowlessApps)
-        else { return nil }
-        let target = ordered[targetIndex]
-        guard let targetID = target.windowID,
-              let targetRank = history.firstIndex(of: targetID), targetRank > 0
-        else { return nil }
-        let visibleIDs = Set(items.compactMap(\.windowID))
-        guard history.prefix(through: targetRank).allSatisfy({ visibleIDs.contains($0) }) else { return nil }
-        if groupByApp {
-            let visiblePIDs = Set(items.map(\.pid))
-            let appHistory = WindowUseTracker.shared.apps
-            guard appHistory.first == frontmostPID,
-                  let rank = appHistory.firstIndex(of: target.pid),
-                  appHistory.prefix(through: rank).allSatisfy({ visiblePIDs.contains($0) })
-            else {
-                return nil
-            }
-        }
-        guard WindowUseTracker.shared.windows == history,
-              WindowUseTracker.shared.historyRevision == revision else { return nil }
-        return (source, target, history, revision)
     }
 
     private static func listWindows(appRules: [String: SwitcherAppRule],
@@ -765,8 +691,8 @@ enum WindowEnumerator {
         let app = AXUIElementCreateApplication(pid)
         // An app that is not servicing its run loop would hold every AX call
         // for the default timeout. The Switcher's serial session queue
-        // must stay available for later shortcuts. The six synchronous
-        // listWindows(for:) Dock and preview callers run on main, where a long
+        // must stay available for later shortcuts. The five synchronous
+        // listWindows(for:) Dock and switcher callers run on main, where a long
         // wait also stalls the event taps (issue #189).
         AXUIElementSetMessagingTimeout(app, messagingTimeout)
         var axWindows: [AXUIElement] = []

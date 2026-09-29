@@ -430,6 +430,12 @@ final class WindowPreviewProvider {
         warmTask = nil
     }
 
+    /// The activated app's windows are listed here, off the main thread. A
+    /// slow app can hold that Accessibility walk for seconds, which must not
+    /// tie up a thread Swift's tasks share.
+    private static let warmEnumerationQueue = DispatchQueue(label: "com.vorssaint.preview.warm-enumeration",
+                                                            qos: .utility)
+
     /// Waits for the stage/space transition to settle, then captures the
     /// activated app's windows. Never prunes: warming only adds fresh entries.
     private func scheduleWarm(pid: pid_t) {
@@ -446,12 +452,13 @@ final class WindowPreviewProvider {
             self.pendingWarmPid = nil
             warmTask?.cancel()
             let snapshot = WindowEnumerator.snapshot()
-            let enumerationTask = Task.detached(priority: .utility) {
-                WindowEnumerator.listWindows(for: pid, snapshot: snapshot)
-            }
             warmTask = Task(priority: .utility) { [weak self] in
                 guard let self else { return }
-                let items = await enumerationTask.value
+                let items = await withCheckedContinuation { continuation in
+                    Self.warmEnumerationQueue.async {
+                        continuation.resume(returning: WindowEnumerator.listWindows(for: pid, snapshot: snapshot))
+                    }
+                }
                 guard !items.isEmpty, !Task.isCancelled else { return }
                 for item in items {
                     guard !Task.isCancelled, let id = item.previewWindowID else { continue }
