@@ -668,6 +668,12 @@ final class LinearResampler: @unchecked Sendable {
     /// heard kept filling, and that backlog must not play.
     private var startPosition: Int64?
 
+    /// Seconds of unread audio a lane may hold before it catches up. Normal
+    /// feeding keeps well under this (about one 2048-frame chunk).
+    static let maximumBacklog = 0.2
+    /// Seconds kept when it catches up, so the next reads do not run dry.
+    static let keptBacklog = 0.05
+
     init(buffer: AudioRingBuffer, startingAt position: Int64? = nil) {
         self.buffer = buffer
         self.startPosition = position
@@ -677,6 +683,16 @@ final class LinearResampler: @unchecked Sendable {
         if let position = startPosition {
             startPosition = nil
             buffer.skip(to: position)
+        }
+        // While the renderer is not taking audio (the speaker connecting,
+        // being switched), the tap keeps writing. Played back later at the
+        // same rate, that backlog would stay as delay for the rest of the
+        // session, so anything past a small margin is skipped.
+        let rate = buffer.sampleRate
+        if buffer.availableFrames > Int(rate * Self.maximumBacklog) {
+            buffer.skip(to: buffer.writePosition - Int64(rate * Self.keptBacklog))
+            carry.removeAll(keepingCapacity: true)
+            phase = 0
         }
         guard frameCount > 0 else { return }
         let sourceRate = buffer.sampleRate > 0 ? buffer.sampleRate : 44_100
@@ -858,6 +874,12 @@ final class AirPlayRenderer: @unchecked Sendable {
     private let targetLookahead = 0.75
 
     private func provide() {
+        // A feed that fell behind the playback clock would enqueue late
+        // chunks back to back; restart the timeline just ahead of it instead.
+        let now = synchronizer.currentTime()
+        if CMTimeCompare(nextPTS, now) < 0 {
+            nextPTS = CMTimeAdd(now, CMTime(value: CMTimeValue(sampleRate * 0.05), timescale: CMTimeScale(sampleRate)))
+        }
         while renderer.isReadyForMoreMediaData {
             let lookahead = CMTimeGetSeconds(CMTimeSubtract(nextPTS, synchronizer.currentTime()))
             if lookahead > targetLookahead { break }

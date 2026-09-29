@@ -442,3 +442,29 @@ enum AirPlayConcurrentLanesContract {
         first.end()
     }
 }
+
+/// Audio that piled up while the renderer was not reading must not turn into
+/// delay for the rest of the session, while normal feeding keeps every frame.
+enum AirPlayBacklogContract {
+    static func run(_ suite: TestSuite) {
+        func ring(holding frames: Int) -> AudioRingBuffer {
+            let ring = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 16)
+            let block = (0..<frames).flatMap { [Float($0), Float($0)] }
+            block.withUnsafeBufferPointer { ring.write(frames: $0.baseAddress!, frameCount: frames, gain: 1) }
+            return ring
+        }
+        var output = [Float](repeating: 0, count: 1_024 * 2)
+
+        let stalled = ring(holding: 44_100)
+        LinearResampler(buffer: stalled).read(into: &output, frameCount: 1_024)
+        suite.expect(stalled.availableFrames <= Int(44_100 * LinearResampler.keptBacklog),
+                     "a second of backlog is cut down to the kept margin")
+        suite.expect(output[0] >= Float(44_100 - Int(44_100 * LinearResampler.keptBacklog) - 1),
+                     "playback continues from the newest audio, not the oldest")
+
+        let normal = ring(holding: 4_096)
+        LinearResampler(buffer: normal).read(into: &output, frameCount: 1_024)
+        suite.expect(normal.availableFrames == 4_096 - 1_024 && output[0] == 0,
+                     "a normal amount of buffered audio is played in full")
+    }
+}
