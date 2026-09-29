@@ -100,6 +100,24 @@ enum AirPlayRouteContract {
                      "a missing output that mentions AirPlay falls back like any other device")
 
         connection(suite, sentinel: sentinel)
+        unavailableRow(suite, sentinel: sentinel)
+    }
+
+    /// The AirPlay entry stays listed while no speaker is picked; the app's
+    /// menu must keep that row selected instead of adding a second one.
+    private static func unavailableRow(_ suite: TestSuite, sentinel: String) {
+        let listed = ["BuiltInSpeakerDevice", "HeadsetOutput", sentinel]
+        suite.expect(MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: "UnpluggedHeadphones",
+                                                                   isUnavailable: true, listedUIDs: listed),
+                     "an unplugged output that is no longer listed still gets its unavailable row")
+        suite.expect(!MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: sentinel,
+                                                                    isUnavailable: true, listedUIDs: listed),
+                     "the listed AirPlay entry keeps its own row instead of a duplicate unavailable row")
+        suite.expect(!MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: "HeadsetOutput",
+                                                                    isUnavailable: false, listedUIDs: listed)
+                     && !MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: nil,
+                                                                       isUnavailable: true, listedUIDs: listed),
+                     "an available or unset output never gets the unavailable row")
     }
 
     /// Losing the speaker must hand the app back to the default output, not

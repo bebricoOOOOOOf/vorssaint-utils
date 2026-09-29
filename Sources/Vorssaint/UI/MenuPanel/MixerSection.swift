@@ -1067,7 +1067,10 @@ private struct MixerRow: View {
                 Text(outputDeviceTitle(device))
                     .tag(device.uid)
             }
-            if let selected = app.selectedOutputDeviceUID, app.outputDeviceUnavailable {
+            if let selected = app.selectedOutputDeviceUID,
+               MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: selected,
+                                                             isUnavailable: app.outputDeviceUnavailable,
+                                                             listedUIDs: mixer.outputDevices.map(\.uid)) {
                 Text(l10n.s.mixerOutputUnavailable)
                     .tag(selected)
             }

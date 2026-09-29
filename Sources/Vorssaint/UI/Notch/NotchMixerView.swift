@@ -585,7 +585,10 @@ private struct NotchAppFader: View {
                 ForEach(mixer.outputDevices) { device in
                     Text(device.isDefault ? "\(device.name) (\(l10n.s.mixerOutputCurrent))" : device.name).tag(device.uid)
                 }
-                if let selected = app.selectedOutputDeviceUID, app.outputDeviceUnavailable {
+                if let selected = app.selectedOutputDeviceUID,
+                   MixerRoutingSupport.needsUnavailableOutputRow(selectedUID: selected,
+                                                                 isUnavailable: app.outputDeviceUnavailable,
+                                                                 listedUIDs: mixer.outputDevices.map(\.uid)) {
                     Text(l10n.s.mixerOutputUnavailable).tag(selected)
                 }
             }

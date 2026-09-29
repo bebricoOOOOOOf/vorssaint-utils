@@ -254,6 +254,16 @@ enum MixerRoutingSupport {
         uid == AirPlayRouteManager.airPlaySentinelUID
     }
 
+    /// Whether an app's output menu needs its own "Output unavailable" row for
+    /// the selected output. Only when that output is not listed anyway (an
+    /// unplugged device): a listed one keeps its own row selected, since two
+    /// rows sharing a tag would leave the menu ticking the wrong one.
+    static func needsUnavailableOutputRow(selectedUID: String?, isUnavailable: Bool,
+                                          listedUIDs: [String]) -> Bool {
+        guard let selectedUID, isUnavailable else { return false }
+        return !listedUIDs.contains(selectedUID)
+    }
+
     /// Outputs an app's audio can go to right now. The AirPlay entry stays in
     /// the list (choosing it opens the picker) but only carries audio while a
     /// speaker is picked; otherwise the app falls back to the default output,
