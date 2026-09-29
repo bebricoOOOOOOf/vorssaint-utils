@@ -59,7 +59,9 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private var routingContext: NSObject?
     private var routingContextID: String?
     private weak var activePickerView: NSView?
+    /// The backup check, scheduled only while a stream is live.
     private var pollTimer: Timer?
+    private var contextObservers: [NSObjectProtocol] = []
     /// Called on the main thread when the connection or speaker changes.
     private var onChange: (() -> Void)?
 
@@ -90,23 +92,36 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     }
 
     /// Starts tracking the picked speaker while the mixer runs. Main thread.
+    ///
+    /// Nothing wakes up on a schedule for someone who never uses AirPlay: the
+    /// context announces when its output devices change. Only while a stream
+    /// is live does a slow check back that up, so a speaker that disappears
+    /// without a notification still hands its apps back to the Mac.
     func activate(onChange: @escaping () -> Void) {
         assert(Thread.isMainThread)
         self.onChange = onChange
         Self.snapshotLock.lock()
         Self.snapshotIsListed = isAvailable
         Self.snapshotLock.unlock()
+        guard isAvailable, let context = routingContext else { return }
         refreshActiveDevice()
-        guard isAvailable, pollTimer == nil else { return }
-        // Poll the speaker name every 1.5 seconds on the main run loop.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            self?.refreshActiveDevice()
+        if contextObservers.isEmpty {
+            contextObservers = ["AVOutputContextOutputDeviceDidChangeNotification",
+                                "AVOutputContextOutputDevicesDidChangeNotification"].map { name in
+                NotificationCenter.default.addObserver(forName: Notification.Name(name), object: context,
+                                                       queue: .main) { [weak self] _ in
+                    self?.refreshActiveDevice()
+                }
+            }
         }
+        updateStreamCheck()
     }
 
     /// Stops tracking; the mixer no longer lists AirPlay. Main thread.
     func deactivate() {
         assert(Thread.isMainThread)
+        contextObservers.forEach(NotificationCenter.default.removeObserver)
+        contextObservers = []
         pollTimer?.invalidate()
         pollTimer = nil
         onChange = nil
@@ -227,7 +242,9 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
                 return n
             }
             if !names.isEmpty {
-                name = names.joined(separator: " + ")
+                // Sorted, so a group whose members come back in another order
+                // is not reported as a new speaker.
+                name = names.sorted().joined(separator: " + ")
             }
         }
 
@@ -291,8 +308,29 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         defer { streamLock.unlock() }
         startRendererIfNeeded()
         guard airPlayRenderer != nil else { return nil }
-        return streams.register(appID: appID, buffer: buffer) { [weak self] token in
+        let registration = streams.register(appID: appID, buffer: buffer) { [weak self] token in
             self?.endAudioStream(token)
+        }
+        DispatchQueue.main.async { [weak self] in self?.updateStreamCheck() }
+        return registration
+    }
+
+    /// Runs the backup check exactly while the mixer is active and a stream is
+    /// live. Main thread; reads the live state when it runs, so updates that
+    /// arrive out of order still settle on the right answer.
+    private func updateStreamCheck() {
+        assert(Thread.isMainThread)
+        streamLock.lock()
+        let streaming = !streams.isEmpty
+        streamLock.unlock()
+        let wanted = streaming && onChange != nil && isAvailable
+        if wanted, pollTimer == nil {
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+                self?.refreshActiveDevice()
+            }
+        } else if !wanted, let timer = pollTimer {
+            timer.invalidate()
+            pollTimer = nil
         }
     }
 
@@ -319,6 +357,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         defer { streamLock.unlock() }
         if streams.remove(token) {
             stopRenderer()
+            DispatchQueue.main.async { [weak self] in self?.updateStreamCheck() }
         }
     }
 
