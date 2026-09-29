@@ -105,31 +105,31 @@ enum AirPlayRouteContract {
     /// Losing the speaker must hand the app back to the default output, not
     /// keep it tapped and silent; picking one again restores the AirPlay route.
     private static func connection(_ suite: TestSuite, sentinel: String) {
-        let listedOutputs = ["BuiltInSpeakerDevice", "ArctisNovaPro", sentinel]
+        let listedOutputs = ["BuiltInSpeakerDevice", "HeadsetOutput", sentinel]
 
         let disconnected = MixerRoutingSupport.routableOutputUIDs(listedOutputs, airPlayConnected: false)
-        suite.expect(disconnected == ["BuiltInSpeakerDevice", "ArctisNovaPro"],
+        suite.expect(disconnected == ["BuiltInSpeakerDevice", "HeadsetOutput"],
                      "without a picked speaker the AirPlay entry carries no audio")
         suite.expect(MixerRoutingSupport.effectiveDeviceUID(selectedUID: sentinel,
                                                             availableUIDs: disconnected,
-                                                            defaultUID: "ArctisNovaPro") == "ArctisNovaPro"
+                                                            defaultUID: "HeadsetOutput") == "HeadsetOutput"
                      && MixerRoutingSupport.selectedDeviceUnavailable(selectedUID: sentinel,
                                                                       availableUIDs: disconnected),
                      "an app routed to AirPlay plays on the default output while no speaker is picked")
         suite.expect(!MixerRoutingSupport.requiresEngine(volume: 1,
                                                          selectedOutputDeviceUID: sentinel,
-                                                         targetOutputDeviceUID: "ArctisNovaPro",
-                                                         defaultOutputDeviceUID: "ArctisNovaPro"),
+                                                         targetOutputDeviceUID: "HeadsetOutput",
+                                                         defaultOutputDeviceUID: "HeadsetOutput"),
                      "at 100% that fallback is untapped passthrough, not a muting tap")
 
         let connected = MixerRoutingSupport.routableOutputUIDs(listedOutputs, airPlayConnected: true)
         suite.expect(MixerRoutingSupport.effectiveDeviceUID(selectedUID: sentinel,
                                                             availableUIDs: connected,
-                                                            defaultUID: "ArctisNovaPro") == sentinel,
+                                                            defaultUID: "HeadsetOutput") == sentinel,
                      "picking a speaker again restores the AirPlay route")
         suite.expect(MixerRoutingSupport.effectiveDeviceUID(selectedUID: "BuiltInSpeakerDevice",
                                                             availableUIDs: disconnected,
-                                                            defaultUID: "ArctisNovaPro") == "BuiltInSpeakerDevice",
+                                                            defaultUID: "HeadsetOutput") == "BuiltInSpeakerDevice",
                      "other routes are untouched by the AirPlay connection")
     }
 }
@@ -198,9 +198,9 @@ enum AirPlayStreamRegistryContract {
             return abs(Int(output[2_047 * 2]) - Int(Int16(level * 32_767))) <= 2
         }
 
-        let previous = start("spotify")
+        let previous = start("app.first")
         previous.write(0.1)
-        let replacement = start("spotify")
+        let replacement = start("app.first")
         previous.write(0.1)
         replacement.write(0.2)
         suite.expect(heard(0.2),
@@ -214,7 +214,7 @@ enum AirPlayStreamRegistryContract {
         replacement.write(0.2)
         suite.expect(emptied == [false] && heard(0.2), "a second stop (from deinit) changes nothing")
 
-        let discarded = start("spotify")
+        let discarded = start("app.first")
         discarded.write(0.3)
         replacement.write(0.2)
         discarded.registration.end()
@@ -224,11 +224,11 @@ enum AirPlayStreamRegistryContract {
 
         // The engine heard again kept writing while hidden; the mix continues
         // with what it writes from now on, not with that backlog.
-        let hidden = start("podcasts")
+        let hidden = start("app.second")
         hidden.write(0.4)
         replacement.write(0.2)
         _ = heard(0.6)
-        let brief = start("podcasts")
+        let brief = start("app.second")
         hidden.write(0.4, frames: 16_384)
         brief.registration.end()
         hidden.write(0.5)
@@ -236,7 +236,7 @@ enum AirPlayStreamRegistryContract {
         suite.expect(heard(0.7), "a lane that falls back starts at new audio, not at its hidden backlog")
         hidden.registration.end()
 
-        let other = start("music")
+        let other = start("app.third")
         other.write(0.05)
         replacement.write(0.2)
         suite.expect(heard(0.25), "different apps are mixed together")
@@ -329,11 +329,11 @@ enum AirPlayRateChangeContract {
 /// Reading one that is gone must answer nil, not raise.
 enum AirPlayPrivateAPIContract {
     private final class Device: NSObject {
-        @objc let name = "Games Room"
+        @objc let name = "Living Room Speaker"
     }
 
     static func run(_ suite: TestSuite) {
-        suite.expect(AirPlayPrivateAPI.string(Device(), "name") == "Games Room",
+        suite.expect(AirPlayPrivateAPI.string(Device(), "name") == "Living Room Speaker",
                      "a property that exists is read")
         suite.expect(AirPlayPrivateAPI.string(Device(), "ID") == nil,
                      "a property this object does not have answers nil instead of raising")
