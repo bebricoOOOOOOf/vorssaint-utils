@@ -341,3 +341,21 @@ enum AirPlayPrivateAPIContract {
                      "an object without the key answers nil")
     }
 }
+
+/// AirPlay hides itself unless every private piece it needs is present; a
+/// picker that cannot be bound would move the whole Mac's output instead.
+enum AirPlayAvailabilityContract {
+    static func run(_ suite: TestSuite) {
+        func available(mixer: Bool = true, context: Bool = true, id: String? = "context-id",
+                       picker: Bool = true, renderer: Bool = true) -> Bool {
+            AirPlayAvailability.isAvailable(mixerSupported: mixer, hasContext: context, contextID: id,
+                                            pickerCanBind: picker, rendererCanBind: renderer)
+        }
+        suite.expect(available(), "AirPlay is offered when every piece is present")
+        suite.expect(!available(mixer: false), "not before the mixer is supported (macOS 14.4)")
+        suite.expect(!available(context: false), "not without the routing context")
+        suite.expect(!available(id: nil) && !available(id: ""), "not when the context id cannot be read")
+        suite.expect(!available(picker: false), "not when the picker cannot be bound to the context")
+        suite.expect(!available(renderer: false), "not when the renderer cannot be bound to the context")
+    }
+}

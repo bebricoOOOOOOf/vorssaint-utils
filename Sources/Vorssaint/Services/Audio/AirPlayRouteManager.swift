@@ -57,6 +57,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private var cachedSpeakerName: String?
 
     private var routingContext: NSObject?
+    private var routingContextID: String?
     private weak var activePickerView: NSView?
     private var pollTimer: Timer?
     /// Called on the main thread when the connection or speaker changes.
@@ -74,10 +75,14 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         dlopen("/System/Library/Frameworks/AVKit.framework/AVKit", RTLD_NOW)
         dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_NOW)
         setupContext()
-        // Streaming needs both the shared context and a renderer that can be
-        // bound to it; without either, AirPlay is never offered.
-        self.isAvailable = routingContext != nil
-            && AVSampleBufferAudioRenderer.instancesRespond(to: sel_registerName("setOutputContext:"))
+        let mixerSupported: Bool
+        if #available(macOS 14.4, *) { mixerSupported = true } else { mixerSupported = false }
+        self.isAvailable = AirPlayAvailability.isAvailable(
+            mixerSupported: mixerSupported,
+            hasContext: routingContext != nil,
+            contextID: routingContextID,
+            pickerCanBind: AVRoutePickerView.instancesRespond(to: sel_registerName("setOutputContextID:")),
+            rendererCanBind: AVSampleBufferAudioRenderer.instancesRespond(to: sel_registerName("setOutputContext:")))
     }
 
     deinit {
@@ -111,31 +116,30 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         Self.snapshotLock.unlock()
     }
 
+    /// Only the default shared context: the system audio context is the route
+    /// of the whole Mac, which a per-app route must never move.
     private func setupContext() {
         guard let cls = NSClassFromString("AVOutputContext"), let sym = msgSendSym else { return }
         let msgClass = unsafeBitCast(sym, to: MsgSendClass.self)
-        let sharedSys = sel_registerName("sharedSystemAudioContext")
         let defaultShared = sel_registerName("defaultSharedOutputContext")
-
-        // Each class method only when this macOS still has it: sending one
-        // that is gone raises instead of returning nil.
-        let system = class_getClassMethod(cls, sharedSys) != nil ? msgClass(cls, sharedSys) : nil
-        let fallback = system == nil && class_getClassMethod(cls, defaultShared) != nil ? msgClass(cls, defaultShared) : nil
-        if let ctx = (system ?? fallback) as? NSObject {
-            self.routingContext = ctx
-        }
+        // Only when this macOS still has it: sending a class method that is
+        // gone raises instead of returning nil.
+        guard class_getClassMethod(cls, defaultShared) != nil,
+              let context = msgClass(cls, defaultShared) as? NSObject else { return }
+        routingContext = context
+        routingContextID = AirPlayPrivateAPI.string(context, "ID")
     }
 
-    /// Creates and binds an `AVRoutePickerView` to the routing context.
+    /// Creates an `AVRoutePickerView` bound to the routing context, or nil
+    /// when it cannot be bound: an unbound picker works on the whole Mac's
+    /// audio route, so it is never handed out.
     func makeRoutePickerView(isActive: Bool = true) -> NSView? {
-        guard let context = routingContext, let sym = msgSendSym else { return nil }
+        guard isAvailable, let contextID = routingContextID, let sym = msgSendSym else { return nil }
         let picker = AVRoutePickerView()
         let msgObj = unsafeBitCast(sym, to: MsgSendObj.self)
         let setCtxSel = sel_registerName("setOutputContextID:")
-
-        if let ctxID = AirPlayPrivateAPI.string(context, "ID"), picker.responds(to: setCtxSel) {
-            msgObj(picker, setCtxSel, ctxID as AnyObject)
-        }
+        guard picker.responds(to: setCtxSel) else { return nil }
+        msgObj(picker, setCtxSel, contextID as AnyObject)
         picker.delegate = self
         if isActive {
             self.activePickerView = picker
@@ -340,6 +344,19 @@ enum AirPlayPrivateAPI {
     static func string(_ object: NSObject, _ key: String) -> String? {
         guard object.responds(to: NSSelectorFromString(key)) else { return nil }
         return object.value(forKey: key) as? String
+    }
+}
+
+// MARK: - Availability
+
+/// AirPlay is offered only when every private piece it depends on is there.
+/// Each one matters on its own: without the context id or the picker's
+/// context setter the picker falls back to the whole Mac's route, and without
+/// the renderer binding the stream would play on the Mac.
+enum AirPlayAvailability {
+    static func isAvailable(mixerSupported: Bool, hasContext: Bool, contextID: String?,
+                            pickerCanBind: Bool, rendererCanBind: Bool) -> Bool {
+        mixerSupported && hasContext && !(contextID?.isEmpty ?? true) && pickerCanBind && rendererCanBind
     }
 }
 
