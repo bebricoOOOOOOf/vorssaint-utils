@@ -80,7 +80,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private let msgSendSym = dlsym(dlopen(nil, RTLD_NOW), "objc_msgSend")
 
     private override init() {
-        assert(Thread.isMainThread, "AirPlayRouteManager must be created on the main thread")
+        dispatchPrecondition(condition: .onQueue(.main))
         super.init()
         dlopen("/System/Library/Frameworks/AVKit.framework/AVKit", RTLD_NOW)
         dlopen("/System/Library/Frameworks/AVFoundation.framework/AVFoundation", RTLD_NOW)
@@ -106,7 +106,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     /// is live does a slow check back that up, so a speaker that disappears
     /// without a notification still hands its apps back to the Mac.
     func activate(onChange: @escaping () -> Void) {
-        assert(Thread.isMainThread)
+        dispatchPrecondition(condition: .onQueue(.main))
         self.onChange = onChange
         Self.snapshotLock.lock()
         Self.snapshotIsListed = isAvailable
@@ -127,7 +127,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
     /// Stops tracking; the mixer no longer lists AirPlay. Main thread.
     func deactivate() {
-        assert(Thread.isMainThread)
+        dispatchPrecondition(condition: .onQueue(.main))
         contextObservers.forEach(NotificationCenter.default.removeObserver)
         contextObservers = []
         pollTimer?.invalidate()
@@ -244,7 +244,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
     /// Refreshes the currently connected AirPlay device name and status.
     func refreshActiveDevice() {
-        assert(Thread.isMainThread)
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let context = routingContext, let sym = msgSendSym else { return }
         let msgObjReturn = unsafeBitCast(sym, to: MsgSendObjReturn.self)
 
@@ -337,7 +337,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     /// live. Main thread; reads the live state when it runs, so updates that
     /// arrive out of order still settle on the right answer.
     private func updateStreamCheck() {
-        assert(Thread.isMainThread)
+        dispatchPrecondition(condition: .onQueue(.main))
         streamLock.lock()
         let streaming = !streams.isEmpty
         streamLock.unlock()
