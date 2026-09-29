@@ -58,7 +58,9 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
 
     private var routingContext: NSObject?
     private var routingContextID: String?
-    private weak var activePickerView: NSView?
+    /// Every header picker currently alive: the panel and Settings each host
+    /// one, and either may be the one on screen.
+    private let headerPickers = NSHashTable<NSView>.weakObjects()
     /// The backup check, scheduled only while a stream is live.
     private var pollTimer: Timer?
     private var contextObservers: [NSObjectProtocol] = []
@@ -157,14 +159,23 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         msgObj(picker, setCtxSel, contextID as AnyObject)
         picker.delegate = self
         if isActive {
-            self.activePickerView = picker
+            headerPickers.add(picker)
         }
         return picker
     }
 
     /// Returns true if an active picker view exists to anchor `presentPicker`.
     var canPresentPicker: Bool {
-        activePickerView != nil
+        visibleHeaderPicker != nil
+    }
+
+    /// A header picker the user can actually see. A closed panel or Settings
+    /// window keeps its window object, so having a window is not enough.
+    private var visibleHeaderPicker: NSView? {
+        headerPickers.allObjects.first { picker in
+            guard let window = picker.window else { return false }
+            return window.isVisible && window.occlusionState.contains(.visible)
+        }
     }
 
     private var fallbackWindow: NSWindow?
@@ -174,7 +185,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     /// Programmatically opens the system route picker anchored to the active picker view,
     /// or anchors an invisible transient popup at the mouse cursor if no UI picker is currently mounted.
     func presentPicker() {
-        if let picker = activePickerView, picker.window != nil, let button = findButton(in: picker) {
+        if let picker = visibleHeaderPicker, let button = findButton(in: picker) {
             button.performClick(nil)
             return
         }
