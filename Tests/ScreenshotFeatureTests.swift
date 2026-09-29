@@ -2757,6 +2757,7 @@ enum ScreenshotFeatureTests {
         // Muting every microphone, not just the one the Mac is set to: an app
         // pointed at a device of its own has to go silent too.
         suite.expect(MicMuteSupport.isOwnDevice(name: "Vorssaint Mixer")
+                && MicMuteSupport.isOwnDevice(name: "Vorssaint AirPlay")
                 && MicMuteSupport.isOwnDevice(name: "Vorssaint Island Levels")
                 && MicMuteSupport.isOwnDevice(name: "Vorssaint Recorder")
                 && !MicMuteSupport.isOwnDevice(name: "MacBook Air Microphone"),

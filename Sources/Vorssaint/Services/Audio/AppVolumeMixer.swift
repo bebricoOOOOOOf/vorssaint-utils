@@ -2392,7 +2392,9 @@ private final class AirPlayGainEngine: GainEngine {
         }
 
         let aggregate: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Vorssaint AirPlay (\(appID))",
+            // A fixed name, listed in MicMuteSupport.ownDeviceNames, so no
+            // device list ever offers this private aggregate as an output.
+            kAudioAggregateDeviceNameKey: "Vorssaint AirPlay",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceMainSubDeviceKey: clockDeviceUID,
