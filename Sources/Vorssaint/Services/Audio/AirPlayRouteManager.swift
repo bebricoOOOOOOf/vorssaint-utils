@@ -432,9 +432,9 @@ final class AirPlayStreamRegistry: @unchecked Sendable {
         lanes[appID, default: []].append(Entry(token: token, buffer: buffer))
         // The mixer is updated under the same lock, so its lanes always match
         // this bookkeeping even when registrations race. A buffer that becomes
-        // audible starts at its newest audio, never at a backlog.
-        buffer.discardBuffered()
-        mixer.setBuffer(buffer, forKey: appID)
+        // audible starts at its newest audio, never at a backlog; the feed
+        // queue skips there on the lane's first read, since only it reads rings.
+        mixer.setBuffer(buffer, forKey: appID, startingAt: buffer.writePosition)
         return AirPlayStreamRegistration(token: token, onEnd: onEnd)
     }
 
@@ -459,9 +459,10 @@ final class AirPlayStreamRegistry: @unchecked Sendable {
             lanes[appID] = entries
             if wasAudible {
                 // Nobody read the fallback while it was hidden, so it is full
-                // of old audio; playing that would delay the app for good.
-                fallback.buffer.discardBuffered()
-                mixer.setBuffer(fallback.buffer, forKey: appID)
+                // of old audio; playing that would delay the app for good. A
+                // feed step may still be reading it right now, so the skip is
+                // left to the lane's next read on the feed queue.
+                mixer.setBuffer(fallback.buffer, forKey: appID, startingAt: fallback.buffer.writePosition)
             }
         } else {
             lanes.removeValue(forKey: appID)
@@ -600,8 +601,8 @@ final class AudioRingBuffer: @unchecked Sendable {
     func write(frames: UnsafePointer<Float>, frameCount: Int, gain: Float) {
         let t = OSAtomicAdd64Barrier(0, tail)
         let h = OSAtomicAdd64Barrier(0, head)
-        let available = capacityFrames - Int(t - h)
-        let count = min(frameCount, available)
+        let used = min(capacityFrames, max(0, Int(t - h)))
+        let count = min(frameCount, capacityFrames - used)
         guard count > 0 else { return }
 
         let mask = Int64(capacityFrames - 1)
@@ -613,12 +614,23 @@ final class AudioRingBuffer: @unchecked Sendable {
         _ = OSAtomicAdd64Barrier(Int64(count), tail)
     }
 
-    /// Consumer: skips everything written so far, so the next read starts at
-    /// the newest audio. Only for a buffer no feed step is reading right now.
-    func discardBuffered() {
+    /// How far the producer has written. Safe to read from any thread: it
+    /// only records a position for the consumer to skip to later.
+    var writePosition: Int64 { OSAtomicAdd64Barrier(0, tail) }
+
+    /// Consumer (the feed queue) only: frames written and not yet read.
+    var availableFrames: Int {
         let h = OSAtomicAdd64Barrier(0, head)
         let t = OSAtomicAdd64Barrier(0, tail)
-        if t > h { _ = OSAtomicAdd64Barrier(t - h, head) }
+        return max(0, Int(t - h))
+    }
+
+    /// Consumer (the feed queue) only: moves the read position forward to
+    /// `position`, never past what has been written, never backwards.
+    func skip(to position: Int64) {
+        let h = OSAtomicAdd64Barrier(0, head)
+        let target = min(position, OSAtomicAdd64Barrier(0, tail))
+        if target > h { _ = OSAtomicAdd64Barrier(target - h, head) }
     }
 
     /// Consumer: Called from the AirPlay streaming feed queue.
@@ -626,7 +638,7 @@ final class AudioRingBuffer: @unchecked Sendable {
     func read(into destination: UnsafeMutablePointer<Float>, frameCount: Int) -> Int {
         let h = OSAtomicAdd64Barrier(0, head)
         let t = OSAtomicAdd64Barrier(0, tail)
-        let count = min(frameCount, Int(t - h))
+        let count = min(frameCount, max(0, Int(t - h)))
 
         let mask = Int64(capacityFrames - 1)
         for i in 0..<count {
@@ -651,11 +663,21 @@ final class LinearResampler: @unchecked Sendable {
     private var carry: [Float] = []
     private var scratch = [Float](repeating: 0, count: 8192 * 2)
 
-    init(buffer: AudioRingBuffer) {
+    /// Where this lane starts reading, applied by its first read on the feed
+    /// queue. Recorded when the lane is (re)assigned: a buffer that was not
+    /// heard kept filling, and that backlog must not play.
+    private var startPosition: Int64?
+
+    init(buffer: AudioRingBuffer, startingAt position: Int64? = nil) {
         self.buffer = buffer
+        self.startPosition = position
     }
 
     func read(into destination: UnsafeMutablePointer<Float>, frameCount: Int) {
+        if let position = startPosition {
+            startPosition = nil
+            buffer.skip(to: position)
+        }
         guard frameCount > 0 else { return }
         let sourceRate = buffer.sampleRate > 0 ? buffer.sampleRate : 44_100
         let ratio = sourceRate / 44_100.0
@@ -720,9 +742,12 @@ final class MixingAudioSource: @unchecked Sendable {
     private let limiter = BoostLookaheadLimiter(channels: 2)
     private let limiterRelease = BoostLimiter.release(sampleRate: 44_100)
 
-    func setBuffer(_ buffer: AudioRingBuffer, forKey key: String) {
+    /// `startingAt` is where the lane begins reading (see `LinearResampler`).
+    /// Only the feed queue reads a ring, so only it may move the read
+    /// position; this just hands it the position to move to.
+    func setBuffer(_ buffer: AudioRingBuffer, forKey key: String, startingAt position: Int64? = nil) {
         lock.lock()
-        resamplers[key] = LinearResampler(buffer: buffer)
+        resamplers[key] = LinearResampler(buffer: buffer, startingAt: position)
         lock.unlock()
     }
 

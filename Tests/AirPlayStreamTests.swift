@@ -377,3 +377,68 @@ enum AirPlayAvailabilityContract {
         suite.expect(!available(renderer: false), "not when the renderer cannot be bound to the context")
     }
 }
+
+/// Lanes are switched on whichever thread starts or stops an engine while the
+/// feed keeps reading on its own queue. Only the feed may move a ring's read
+/// position, or both move it at once and a read runs past what was written.
+enum AirPlayConcurrentLanesContract {
+    static func run(_ suite: TestSuite) {
+        let mixer = MixingAudioSource()
+        let registry = AirPlayStreamRegistry(mixer: mixer)
+        let running = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 14)
+        let long = registry.register(appID: "app.first", buffer: running) { token in _ = registry.remove(token) }
+        let stop = DispatchSemaphore(value: 0)
+        let finished = DispatchGroup()
+
+        // Like the real pipeline: the tap writes small IO blocks on its own
+        // thread while the feed reads large chunks on another.
+        finished.enter()
+        DispatchQueue.global().async {
+            let block = [Float](repeating: 0.1, count: 64 * 2)
+            while stop.wait(timeout: .now()) == .timedOut {
+                block.withUnsafeBufferPointer { running.write(frames: $0.baseAddress!, frameCount: 64, gain: 1) }
+            }
+            finished.leave()
+        }
+        finished.enter()
+        DispatchQueue.global().async {
+            var output = [Int16](repeating: 0, count: 2_048 * 2)
+            while stop.wait(timeout: .now()) == .timedOut {
+                output.withUnsafeMutableBufferPointer { mixer.readFrames(into: $0.baseAddress!, frameCount: 2_048) }
+            }
+            finished.leave()
+        }
+        for _ in 0..<5_000 {
+            let replacement = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 12)
+            let registration = registry.register(appID: "app.first", buffer: replacement) { token in _ = registry.remove(token) }
+            registration.end()
+        }
+        stop.signal()
+        stop.signal()
+        suite.expect(finished.wait(timeout: .now() + 5) == .success,
+                     "lanes switching while the feed reads never break the reader")
+        suite.expect(running.availableFrames <= 1 << 14, "the running ring never reads past what was written")
+        long.end()
+
+        // The invariant behind it, deterministically: switching lanes records
+        // where to start and leaves every read position alone; only the next
+        // read on the feed queue moves it.
+        let quietMixer = MixingAudioSource()
+        let quietRegistry = AirPlayStreamRegistry(mixer: quietMixer)
+        let heard = AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 14)
+        let first = quietRegistry.register(appID: "app.first", buffer: heard) { token in _ = quietRegistry.remove(token) }
+        let backlog = [Float](repeating: 0.1, count: 3_000 * 2)
+        backlog.withUnsafeBufferPointer { heard.write(frames: $0.baseAddress!, frameCount: 3_000, gain: 1) }
+        let brief = quietRegistry.register(appID: "app.first",
+                                           buffer: AudioRingBuffer(sampleRate: 44_100, capacityFrames: 1 << 12)) { token in
+            _ = quietRegistry.remove(token)
+        }
+        brief.end()
+        suite.expect(heard.availableFrames == 3_000,
+                     "switching lanes does not move a ring's read position from outside the feed")
+        var output = [Int16](repeating: 0, count: 512 * 2)
+        output.withUnsafeMutableBufferPointer { quietMixer.readFrames(into: $0.baseAddress!, frameCount: 512) }
+        suite.expect(heard.availableFrames == 0, "the feed's next read skips the backlog")
+        first.end()
+    }
+}
