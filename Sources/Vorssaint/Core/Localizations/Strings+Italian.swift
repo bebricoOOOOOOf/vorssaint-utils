@@ -1084,6 +1084,8 @@ extension Strings {
         recoveryCountdownTitle: "Mantenere queste impostazioni dello schermo?",
         recoveryCountdownRemaining: { "Ripristino automatico in \($0) s" },
         recoveryFailedMessage: "Impossibile ripristinare la modalità HiDPI precedente",
+        recoveryRetry: "Riprova",
+        recoveryKeepCurrent: "Mantieni modalità attuale",
         toggleHiDPICaption: "Attiva/disattiva ridimensionamento Retina HiDPI"
     )
 }

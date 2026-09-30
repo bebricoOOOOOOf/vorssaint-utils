@@ -107,7 +107,7 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
 
     private func frameForScreen(_ screen: NSScreen) -> NSRect {
         let width: CGFloat = 420
-        let height: CGFloat = 130
+        let height: CGFloat = 156
         let visible = screen.visibleFrame
         let x = visible.midX - width / 2
         let y = max(visible.minY + 10, visible.maxY - height - 28)
@@ -269,13 +269,13 @@ public struct RecoveryHUDView: View {
                 .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(l10n.s.recoveryCountdownTitle)
+                    Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryFailedMessage : l10n.s.recoveryCountdownTitle)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(.white)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if recoveryManager.hasRollbackFailure {
-                        Text(l10n.s.recoveryFailedMessage)
+                        Text("\(l10n.s.recoveryRetry) · Esc / \(l10n.s.recoveryKeepCurrent) · ↵")
                             .font(.system(size: 11.5, weight: .regular))
                             .foregroundStyle(.white.opacity(0.7))
                             .lineLimit(1)
@@ -318,7 +318,7 @@ public struct RecoveryHUDView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(l10n.s.recoveryRevert)
+                        Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryRetry : l10n.s.recoveryRevert)
                         Text("Esc")
                             .font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 4)
@@ -340,7 +340,7 @@ public struct RecoveryHUDView: View {
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(l10n.s.recoveryKeep)
+                        Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryKeepCurrent : l10n.s.recoveryKeep)
                         Text("↵")
                             .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 4)
@@ -357,7 +357,7 @@ public struct RecoveryHUDView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
-        .frame(width: 420, height: 130)
+        .frame(width: 420, height: 156)
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.regularMaterial)

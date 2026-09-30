@@ -1084,6 +1084,8 @@ extension Strings {
         recoveryCountdownTitle: "Bu ekran ayarlarını koru?",
         recoveryCountdownRemaining: { "\($0) sn içinde otomatik geri dönülecek" },
         recoveryFailedMessage: "Önceki HiDPI modu geri yüklenemedi",
+        recoveryRetry: "Tekrar dene",
+        recoveryKeepCurrent: "Geçerli modu koru",
         toggleHiDPICaption: "Retina HiDPI ölçeklemeyi aç/kapat"
     )
 }

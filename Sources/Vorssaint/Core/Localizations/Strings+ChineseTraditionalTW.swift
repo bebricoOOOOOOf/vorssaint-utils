@@ -1085,6 +1085,8 @@ extension Strings {
         recoveryCountdownTitle: "保留這個顯示設定？",
         recoveryCountdownRemaining: { "\($0) 秒後自動恢復" },
         recoveryFailedMessage: "無法恢復先前的 HiDPI 模式",
+        recoveryRetry: "重試",
+        recoveryKeepCurrent: "保留目前模式",
         toggleHiDPICaption: "切換 Retina HiDPI 縮放"
     )
 }

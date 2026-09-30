@@ -1084,6 +1084,8 @@ extension Strings {
         recoveryCountdownTitle: "Conserver ces réglages d’affichage\u{00A0}?",
         recoveryCountdownRemaining: { "Rétablissement automatique dans \($0) s" },
         recoveryFailedMessage: "Impossible de rétablir le mode HiDPI précédent",
+        recoveryRetry: "Réessayer",
+        recoveryKeepCurrent: "Garder le mode actuel",
         toggleHiDPICaption: "Basculer la mise à l’échelle Retina HiDPI"
     )
 }

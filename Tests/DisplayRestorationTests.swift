@@ -408,7 +408,7 @@ enum DisplayRestorationTests {
         suite.expect(service.displayControlFailure == .failed,
                      "a genuine headless transaction failure is not mislabeled as a closed-lid denial")
         // PR #1773 display/HiDPI hardening contracts.
-        let recovery = DisplayRecoveryManager.shared
+        let recovery = DisplayRecoveryManager()
         recovery.confirm()
         let firstRecovery = recovery.beginAction(targetDisplayID: 0xA001, confirmationSeconds: 60)
         let preservedSnapshot = recovery.currentSnapshot?.targetDisplayID
@@ -423,7 +423,9 @@ enum DisplayRestorationTests {
             let originalRecreate = recovery.recreateVirtualMirror
             let originalTeardown = recovery.teardownVirtualMirror
             var teardownCallCount = 0
+            var recreateCallCount = 0
             recovery.recreateVirtualMirror = { _, _, _ in
+                recreateCallCount += 1
                 throw VirtualDisplayError.virtualDisplayCreationFailed
             }
             recovery.teardownVirtualMirror = { _ in
@@ -451,13 +453,14 @@ enum DisplayRestorationTests {
                          "recovery preserves currentSnapshot after rollback failure")
             suite.expect(recovery.remainingSeconds == 0,
                          "recovery zeroes remainingSeconds after rollback failure")
-            suite.expect(teardownCallCount > 0 && !VirtualDisplayService.shared.isVirtualMirrorActive(for: 0xD001),
+            suite.expect(recreateCallCount == 1 && teardownCallCount == 1,
                          "rollback teardown leaves no active virtual mirror on target display")
             let blockedAction = recovery.beginAction(targetDisplayID: 0xD002, confirmationSeconds: 60)
             suite.expect(!blockedAction,
                          "mutations are blocked while in rollback failure state")
             recovery.rollback()
-            suite.expect(recovery.hasRollbackFailure && recovery.awaitingConfirmation,
+            suite.expect(recovery.hasRollbackFailure && recovery.awaitingConfirmation
+                         && recreateCallCount == 2 && teardownCallCount == 2,
                          "rollback retry maintains failure state when restore fails again")
             recovery.confirm()
             suite.expect(!recovery.hasRollbackFailure && !recovery.awaitingConfirmation && recovery.currentSnapshot == nil,

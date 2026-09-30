@@ -1054,6 +1054,8 @@ extension Strings {
         recoveryCountdownTitle: "Підтвердження налаштувань дисплея",
         recoveryCountdownRemaining: { "Автоматичне повернення через \($0) с" },
         recoveryFailedMessage: "Не вдалося відновити попередній режим HiDPI",
+        recoveryRetry: "Повторити",
+        recoveryKeepCurrent: "Залишити поточний режим",
         toggleHiDPICaption: "Перемкнути масштабування Retina HiDPI"
     )
 }

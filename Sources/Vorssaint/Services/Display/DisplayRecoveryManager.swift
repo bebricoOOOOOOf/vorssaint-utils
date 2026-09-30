@@ -59,7 +59,8 @@ public final class DisplayRecoveryManager: ObservableObject, @unchecked Sendable
 
     private var timer: DispatchSourceTimer?
 
-    private init() {}
+    // Internal construction keeps recovery tests isolated from the live singleton.
+    init() {}
 
     deinit {
         cancelTimer()

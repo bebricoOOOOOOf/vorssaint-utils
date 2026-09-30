@@ -1084,6 +1084,8 @@ extension Strings {
         recoveryCountdownTitle: "Potvrdiť nastavenia displeja",
         recoveryCountdownRemaining: { "Automatické vrátenie o \($0) s" },
         recoveryFailedMessage: "Predchádzajúci režim HiDPI sa nepodarilo obnoviť",
+        recoveryRetry: "Skúsiť znova",
+        recoveryKeepCurrent: "Ponechať aktuálny režim",
         toggleHiDPICaption: "Prepnúť Retina HiDPI škálovanie"
     )
 }
