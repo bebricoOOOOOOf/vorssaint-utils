@@ -410,13 +410,13 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     }
 
     private func startRendererIfNeeded() {
-        guard airPlayRenderer == nil else { return }
+        guard airPlayRenderer == nil, let attempt = Self.streamAttempt else { return }
         rendererGeneration += 1
         let generation = rendererGeneration
         guard let renderer = AirPlayRenderer(source: mixerSource, manager: self, onFailure: { [weak self] in
-            // KVO can arrive on the feed queue. Capture the selection now, then
-            // leave that queue before stopping it or publishing mixer state.
-            guard let attempt = Self.streamAttempt else { return }
+            // Keep the selection that created this renderer. A late KVO
+            // failure must not adopt a route picked before the callback.
+            // Leave the feed queue before stopping it or publishing state.
             DispatchQueue.main.async { [weak self] in
                 self?.rendererFailed(generation: generation, attempt: attempt)
             }
