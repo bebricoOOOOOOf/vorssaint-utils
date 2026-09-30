@@ -1079,13 +1079,13 @@ extension Strings {
         nativeHiDPI: "原生 HiDPI",
         virtualHiDPI: "虚拟 HiDPI",
         standardResolution: "标准分辨率 (1x)",
-        recoveryRestoreFailed: "无法恢复之前的 HiDPI 模式。",
-        recoveryRetry: "重试",
-        recoveryKeepCurrent: "保留当前模式",
         recoveryKeep: "保留设置",
         recoveryRevert: "还原",
         recoveryCountdownTitle: "保留这个显示设置？",
         recoveryCountdownRemaining: { "\($0) 秒后自动恢复" },
+        recoveryFailedMessage: "无法恢复先前的 HiDPI 模式",
+        recoveryRetry: "重试",
+        recoveryKeepCurrent: "保留当前模式",
         toggleHiDPICaption: "切换 Retina HiDPI 缩放"
     )
 }

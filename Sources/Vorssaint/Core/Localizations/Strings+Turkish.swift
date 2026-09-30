@@ -1079,13 +1079,13 @@ extension Strings {
         nativeHiDPI: "Yerel HiDPI",
         virtualHiDPI: "Sanal HiDPI",
         standardResolution: "Standart Çözünürlük (1x)",
-        recoveryRestoreFailed: "Önceki HiDPI modu geri yüklenemedi.",
-        recoveryRetry: "Tekrar dene",
-        recoveryKeepCurrent: "Geçerli modu koru",
         recoveryKeep: "Ayarları Koru",
         recoveryRevert: "Geri Dön",
         recoveryCountdownTitle: "Bu ekran ayarlarını koru?",
         recoveryCountdownRemaining: { "\($0) sn içinde otomatik geri dönülecek" },
+        recoveryFailedMessage: "Önceki HiDPI modu geri yüklenemedi",
+        recoveryRetry: "Tekrar dene",
+        recoveryKeepCurrent: "Geçerli modu koru",
         toggleHiDPICaption: "Retina HiDPI ölçeklemeyi aç/kapat"
     )
 }

@@ -408,12 +408,7 @@ enum DisplayRestorationTests {
         suite.expect(service.displayControlFailure == .failed,
                      "a genuine headless transaction failure is not mislabeled as a closed-lid denial")
         // PR #1773 display/HiDPI hardening contracts.
-        var restorationAttempts = 0
-        var teardownAttempts = 0
-        let recovery = DisplayRecoveryManager(restoreVirtualMirror: { _, _ in
-            restorationAttempts += 1
-            throw NSError(domain: "DisplayRecoveryTest", code: 1)
-        }, disableVirtualMirror: { _ in teardownAttempts += 1 })
+        let recovery = DisplayRecoveryManager()
         recovery.confirm()
         let firstRecovery = recovery.beginAction(targetDisplayID: 0xA001, confirmationSeconds: 60)
         let preservedSnapshot = recovery.currentSnapshot?.targetDisplayID
@@ -424,35 +419,68 @@ enum DisplayRestorationTests {
                      "a second display mutation cannot replace an unconfirmed recovery snapshot")
         recovery.confirm()
 
-        let failureStarted = recovery.beginAction(
-            targetDisplayID: 0xD001,
-            previousVirtualMirrorLogicalSize: CGSize(width: 2560, height: 1440),
-            virtualDisplayCreated: false,
-            confirmationSeconds: 60
-        )
-        suite.expect(failureStarted && recovery.awaitingConfirmation && !recovery.hasRollbackFailure,
-                     "recovery begins with clean state")
-        recovery.rollback()
-        suite.expect(recovery.hasRollbackFailure,
-                     "rollback sets hasRollbackFailure when mirror restoration fails")
-        suite.expect(recovery.awaitingConfirmation,
-                     "recovery retains awaitingConfirmation after rollback failure")
-        suite.expect(recovery.currentSnapshot?.targetDisplayID == 0xD001,
-                     "recovery preserves currentSnapshot after rollback failure")
-        suite.expect(recovery.remainingSeconds == 0,
-                     "recovery zeroes remainingSeconds after rollback failure")
-        suite.expect(restorationAttempts == 1 && teardownAttempts == 1,
-                     "rollback teardown leaves no active virtual mirror on target display")
-        let blockedAction = recovery.beginAction(targetDisplayID: 0xD002, confirmationSeconds: 60)
-        suite.expect(!blockedAction,
-                     "mutations are blocked while in rollback failure state")
-        recovery.rollback()
-        suite.expect(recovery.hasRollbackFailure && recovery.awaitingConfirmation
-                     && restorationAttempts == 2 && teardownAttempts == 2,
-                     "rollback retry maintains failure state when restore fails again")
-        recovery.confirm()
-        suite.expect(!recovery.hasRollbackFailure && !recovery.awaitingConfirmation && recovery.currentSnapshot == nil,
-                     "confirm clears rollback failure and transaction state")
+        do {
+            let originalRecreate = recovery.recreateVirtualMirror
+            let originalTeardown = recovery.teardownVirtualMirror
+            var teardownCallCount = 0
+            var recreateCallCount = 0
+            recovery.recreateVirtualMirror = { _, _, _ in
+                recreateCallCount += 1
+                throw VirtualDisplayError.virtualDisplayCreationFailed
+            }
+            recovery.teardownVirtualMirror = { _ in
+                teardownCallCount += 1
+            }
+            defer {
+                recovery.recreateVirtualMirror = originalRecreate
+                recovery.teardownVirtualMirror = originalTeardown
+            }
+
+            let failureStarted = recovery.beginAction(
+                targetDisplayID: 0xD001,
+                previousVirtualMirrorLogicalSize: CGSize(width: 2560, height: 1440),
+                virtualDisplayCreated: false,
+                confirmationSeconds: 60
+            )
+            suite.expect(failureStarted && recovery.awaitingConfirmation && !recovery.hasRollbackFailure,
+                         "recovery begins with clean state")
+            recovery.rollback()
+            suite.expect(recovery.hasRollbackFailure,
+                         "rollback sets hasRollbackFailure when mirror restoration fails")
+            suite.expect(recovery.awaitingConfirmation,
+                         "recovery retains awaitingConfirmation after rollback failure")
+            suite.expect(recovery.currentSnapshot?.targetDisplayID == 0xD001,
+                         "recovery preserves currentSnapshot after rollback failure")
+            suite.expect(recovery.remainingSeconds == 0,
+                         "recovery zeroes remainingSeconds after rollback failure")
+            suite.expect(recreateCallCount == 1 && teardownCallCount == 1,
+                         "rollback teardown leaves no active virtual mirror on target display")
+            let blockedAction = recovery.beginAction(targetDisplayID: 0xD002, confirmationSeconds: 60)
+            suite.expect(!blockedAction,
+                         "mutations are blocked while in rollback failure state")
+            recovery.rollback()
+            suite.expect(recovery.hasRollbackFailure && recovery.awaitingConfirmation
+                         && recreateCallCount == 2 && teardownCallCount == 2,
+                         "rollback retry maintains failure state when restore fails again")
+            recovery.confirm()
+            suite.expect(!recovery.hasRollbackFailure && !recovery.awaitingConfirmation && recovery.currentSnapshot == nil,
+                         "confirm clears rollback failure and transaction state")
+
+            var tornDownTargetID: CGDirectDisplayID?
+            recovery.teardownVirtualMirror = { targetID in
+                tornDownTargetID = targetID
+            }
+            let createdStarted = recovery.beginAction(
+                targetDisplayID: 0xD003,
+                virtualDisplayCreated: true,
+                confirmationSeconds: 60
+            )
+            suite.expect(createdStarted && recovery.awaitingConfirmation,
+                         "recovery begins with virtual display created")
+            recovery.rollback()
+            suite.expect(tornDownTargetID == 0xD003 && !recovery.hasRollbackFailure && !recovery.awaitingConfirmation,
+                         "rollback routes virtual mirror teardown through test seam")
+        }
 
         let allModes = (CGDisplayCopyAllDisplayModes(
             CGMainDisplayID(),
@@ -583,6 +611,8 @@ enum DisplayRestorationTests {
                      && brightnessSource.contains("resolvePhysicalTarget(for: CGMainDisplayID())")
                      && brightnessSource.contains("resolvePhysicalTarget(for: id)"),
                      "brightness service rolls back virtual mirrors on disable and routes virtual IDs to physical displays")
+        suite.expect(!brightnessSource.contains("names[targetID] = screen.localizedName"),
+                     "physical display names are not overridden with the virtual mirror name")
 
         let virtualSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/Display/VirtualDisplayService.swift",
@@ -613,15 +643,20 @@ enum DisplayRestorationTests {
         suite.expect(recoverySource.contains("activeMode?.width == targetW && activeMode?.height == targetH")
                      && recoverySource.contains("activeMode?.pixelWidth == expectedPixelW && activeMode?.pixelHeight == expectedPixelH")
                      && recoverySource.contains("self.hasRollbackFailure = true")
-                     && recoverySource.contains("disableVirtualMirror(for: snapshot.targetDisplayID)"),
+                     && recoverySource.contains("teardownVirtualMirror(snapshot.targetDisplayID)")
+                     && recoverySource.contains("recreateVirtualMirror("),
                      "recovery explicitly verifies active dimensions before reporting virtual mirror restored")
 
         let hudSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/UI/MenuPanel/RecoveryHUDView.swift",
             encoding: .utf8)) ?? ""
         suite.expect(hudSource.contains("!recoveryManager.hasRollbackFailure")
-                     && hudSource.contains("exclamationmark.triangle.fill"),
-                     "recovery HUD reflects rollback failure state and retains keep action")
+                     && hudSource.contains("exclamationmark.triangle.fill")
+                     && hudSource.contains("recoveryFailedMessage")
+                     && hudSource.contains("closePanelsOnly()")
+                     && hudSource.contains("self.startMonitoring()")
+                     && hudSource.contains("panel.orderFrontRegardless()"),
+                     "recovery HUD reflects rollback failure state, retains keep action, and keeps screen observer active")
 
         let commandBarSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarCatalog.swift",
@@ -640,6 +675,9 @@ enum DisplayRestorationTests {
             encoding: .utf8)) ?? ""
         suite.expect(brightnessSectionSource.contains(".disabled(recoveryManager.awaitingConfirmation)"),
                      "resolution and HiDPI controls are disabled while rollback confirmation is pending")
+        suite.expect(!brightnessSectionSource.contains("Slider(value: levelBinding")
+                     && !brightnessSectionSource.contains("multiplierText"),
+                     "menu panel extra brightness control remains a standard toggle without unrequested sliders")
 
         suite.expect(!FileManager.default.fileExists(
             atPath: "Sources/Vorssaint/Services/Display/XDRBoostService.swift"),

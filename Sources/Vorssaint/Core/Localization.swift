@@ -1278,13 +1278,13 @@ struct Strings {
     public let nativeHiDPI: String
     public let virtualHiDPI: String
     public let standardResolution: String
-    public let recoveryRestoreFailed: String
-    public let recoveryRetry: String
-    public let recoveryKeepCurrent: String
     public let recoveryKeep: String
     public let recoveryRevert: String
     public let recoveryCountdownTitle: String
     public let recoveryCountdownRemaining: (Int) -> String
+    public let recoveryFailedMessage: String
+    public let recoveryRetry: String
+    public let recoveryKeepCurrent: String
     public let toggleHiDPICaption: String
 }
 
@@ -2366,13 +2366,13 @@ extension Strings {
         nativeHiDPI: "HiDPI nativo",
         virtualHiDPI: "HiDPI virtual",
         standardResolution: "Resolução padrão (1x)",
-        recoveryRestoreFailed: "Não foi possível restaurar o modo HiDPI anterior.",
-        recoveryRetry: "Tentar novamente",
-        recoveryKeepCurrent: "Manter modo atual",
         recoveryKeep: "Manter alterações",
         recoveryRevert: "Reverter",
         recoveryCountdownTitle: "Confirmar ajustes de tela",
         recoveryCountdownRemaining: { "Revertendo em \($0) s" },
+        recoveryFailedMessage: "Não foi possível restaurar o modo HiDPI anterior",
+        recoveryRetry: "Tentar novamente",
+        recoveryKeepCurrent: "Manter modo atual",
         toggleHiDPICaption: "Alternar dimensionamento Retina HiDPI"
     )
 }
@@ -3455,13 +3455,13 @@ extension Strings {
         nativeHiDPI: "Native HiDPI",
         virtualHiDPI: "Virtual HiDPI",
         standardResolution: "Standard (1x)",
-        recoveryRestoreFailed: "The previous HiDPI mode could not be restored.",
-        recoveryRetry: "Try Again",
-        recoveryKeepCurrent: "Keep Current Mode",
         recoveryKeep: "Keep Changes",
         recoveryRevert: "Revert",
         recoveryCountdownTitle: "Confirm Display Settings",
         recoveryCountdownRemaining: { "Auto-reverting in \($0)s" },
+        recoveryFailedMessage: "Previous HiDPI mode could not be restored",
+        recoveryRetry: "Try Again",
+        recoveryKeepCurrent: "Keep Current Mode",
         toggleHiDPICaption: "Toggle Retina HiDPI scaling"
     )
 }

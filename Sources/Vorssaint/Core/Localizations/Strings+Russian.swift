@@ -1080,13 +1080,13 @@ extension Strings {
         nativeHiDPI: "Нативное HiDPI",
         virtualHiDPI: "Виртуальное HiDPI",
         standardResolution: "Стандартное разрешение (1x)",
-        recoveryRestoreFailed: "Не удалось восстановить прежний режим HiDPI.",
-        recoveryRetry: "Повторить",
-        recoveryKeepCurrent: "Оставить текущий режим",
         recoveryKeep: "Сохранить",
         recoveryRevert: "Вернуть",
         recoveryCountdownTitle: "Сохранить эти настройки дисплея?",
         recoveryCountdownRemaining: { "Автоматический возврат через \($0) сек." },
+        recoveryFailedMessage: "Не удалось восстановить предыдущий режим HiDPI",
+        recoveryRetry: "Повторить",
+        recoveryKeepCurrent: "Оставить текущий режим",
         toggleHiDPICaption: "Переключить масштабирование Retina HiDPI"
     )
 }

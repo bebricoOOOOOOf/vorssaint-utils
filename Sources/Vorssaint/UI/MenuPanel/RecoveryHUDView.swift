@@ -35,10 +35,8 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
     private var localMonitor: Any?
     private var screenObserver: NSObjectProtocol?
     private var isClosing: Bool = false
-    private let recoveryManager: DisplayRecoveryManager
 
     public init(recoveryManager: DisplayRecoveryManager = .shared, autoSubscribe: Bool = true) {
-        self.recoveryManager = recoveryManager
         if autoSubscribe {
             recoveryManager.$awaitingConfirmation
                 .receive(on: DispatchQueue.main)
@@ -73,15 +71,17 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
         guard !isVisible || panels.isEmpty else { return }
         isVisible = true
 
-        startMonitoring()
         setupScreenObserver()
+
         let screens = NSScreen.screens
         guard !screens.isEmpty else {
-            isVisible = false
             closePanelsOnly()
+            stopMonitoring()
             return
         }
+
         recreatePanels(screens: screens)
+        startMonitoring()
     }
 
     public func close() {
@@ -177,23 +177,26 @@ public final class RecoveryHUDController: ObservableObject, @unchecked Sendable 
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self, self.recoveryManager.awaitingConfirmation else { return }
+            guard let self = self, DisplayRecoveryManager.shared.awaitingConfirmation else { return }
             let screens = NSScreen.screens
             guard !screens.isEmpty else {
-                self.isVisible = false
                 self.closePanelsOnly()
+                self.stopMonitoring()
                 return
             }
-            self.isVisible = true
             if self.panels.count != screens.count {
                 self.recreatePanels(screens: screens)
+                self.startMonitoring()
             } else {
                 for (screen, panel) in zip(screens, self.panels) {
                     let frame = self.frameForScreen(screen)
                     if panel.frame != frame {
                         panel.setFrame(frame, display: true)
                     }
+                    panel.orderFrontRegardless()
                 }
+                self.panels.first?.makeKey()
+                self.startMonitoring()
             }
         }
     }
@@ -266,7 +269,7 @@ public struct RecoveryHUDView: View {
                 .frame(width: 34, height: 34)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryRestoreFailed : l10n.s.recoveryCountdownTitle)
+                    Text(recoveryManager.hasRollbackFailure ? l10n.s.recoveryFailedMessage : l10n.s.recoveryCountdownTitle)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)

@@ -1079,13 +1079,13 @@ extension Strings {
         nativeHiDPI: "HiDPI nativo",
         virtualHiDPI: "HiDPI virtuale",
         standardResolution: "Risoluzione standard (1x)",
-        recoveryRestoreFailed: "Impossibile ripristinare la modalità HiDPI precedente.",
-        recoveryRetry: "Riprova",
-        recoveryKeepCurrent: "Mantieni modalità attuale",
         recoveryKeep: "Mantieni impostazioni",
         recoveryRevert: "Ripristina",
         recoveryCountdownTitle: "Mantenere queste impostazioni dello schermo?",
         recoveryCountdownRemaining: { "Ripristino automatico in \($0) s" },
+        recoveryFailedMessage: "Impossibile ripristinare la modalità HiDPI precedente",
+        recoveryRetry: "Riprova",
+        recoveryKeepCurrent: "Mantieni modalità attuale",
         toggleHiDPICaption: "Attiva/disattiva ridimensionamento Retina HiDPI"
     )
 }

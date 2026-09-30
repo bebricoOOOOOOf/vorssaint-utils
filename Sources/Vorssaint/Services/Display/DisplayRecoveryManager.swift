@@ -50,24 +50,17 @@ public final class DisplayRecoveryManager: ObservableObject, @unchecked Sendable
     @Published public private(set) var currentSnapshot: DisplayTransactionSnapshot?
     @Published public private(set) var hasRollbackFailure: Bool = false
 
+    internal var recreateVirtualMirror: (CGDirectDisplayID, Int, Int) throws -> CGDirectDisplayID = { targetID, width, height in
+        try VirtualDisplayService.shared.enableVirtualMirror(for: targetID, width: width, height: height)
+    }
+    internal var teardownVirtualMirror: (CGDirectDisplayID) throws -> Void = { targetID in
+        try VirtualDisplayService.shared.disableVirtualMirror(for: targetID)
+    }
+
     private var timer: DispatchSourceTimer?
 
-    private let restoreVirtualMirrorOverride: ((CGDirectDisplayID, CGSize) throws -> Void)?
-    private let disableVirtualMirrorOverride: ((CGDirectDisplayID) throws -> Void)?
-
-    init(restoreVirtualMirror: ((CGDirectDisplayID, CGSize) throws -> Void)? = nil,
-         disableVirtualMirror: ((CGDirectDisplayID) throws -> Void)? = nil) {
-        restoreVirtualMirrorOverride = restoreVirtualMirror
-        disableVirtualMirrorOverride = disableVirtualMirror
-    }
-
-    private func disableVirtualMirror(for id: CGDirectDisplayID) throws {
-        if let disableVirtualMirrorOverride {
-            try disableVirtualMirrorOverride(id)
-        } else {
-            try VirtualDisplayService.shared.disableVirtualMirror(for: id)
-        }
-    }
+    // Internal construction keeps recovery tests isolated from the live singleton.
+    init() {}
 
     deinit {
         cancelTimer()
@@ -190,7 +183,7 @@ public final class DisplayRecoveryManager: ObservableObject, @unchecked Sendable
         // 1. If virtual display was created, teardown the virtual mirror
         if snapshot.virtualDisplayCreated {
             do {
-                try disableVirtualMirror(for: snapshot.targetDisplayID)
+                try teardownVirtualMirror(snapshot.targetDisplayID)
                 Self.log.info("Disabled virtual mirror for display \(snapshot.targetDisplayID, privacy: .public).")
             } catch {
                 Self.log.error("Failed to disable virtual mirror for display \(snapshot.targetDisplayID, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -259,12 +252,34 @@ public final class DisplayRecoveryManager: ObservableObject, @unchecked Sendable
         }
 
         if let size = snapshot.previousVirtualMirrorLogicalSize {
+            let targetW = max(1, Int(size.width.rounded()))
+            let targetH = max(1, Int(size.height.rounded()))
+            let expectedPixelW = max(targetW, targetW * 2)
+            let expectedPixelH = max(targetH, targetH * 2)
             do {
-                try restoreVirtualMirror(for: snapshot.targetDisplayID, size: size)
-                Self.log.info("Restored previous virtual HiDPI mirror for display \(snapshot.targetDisplayID, privacy: .public).")
+                let virtualID = try recreateVirtualMirror(
+                    snapshot.targetDisplayID,
+                    targetW,
+                    targetH
+                )
+                let activeMode = CGDisplayCopyDisplayMode(virtualID)
+                guard activeMode?.width == targetW && activeMode?.height == targetH &&
+                      activeMode?.pixelWidth == expectedPixelW && activeMode?.pixelHeight == expectedPixelH else {
+                    throw VirtualDisplayError.modeVerificationFailed(
+                        expectedWidth: targetW,
+                        expectedHeight: targetH,
+                        actualWidth: activeMode?.width ?? 0,
+                        actualHeight: activeMode?.height ?? 0,
+                        expectedPixelWidth: expectedPixelW,
+                        expectedPixelHeight: expectedPixelH,
+                        actualPixelWidth: activeMode?.pixelWidth ?? 0,
+                        actualPixelHeight: activeMode?.pixelHeight ?? 0
+                    )
+                }
+                Self.log.info("Restored previous virtual HiDPI mirror for display \(snapshot.targetDisplayID, privacy: .public) at \(targetW)×\(targetH).")
             } catch {
                 Self.log.error("Failed to recreate previous virtual HiDPI mirror: \(error.localizedDescription, privacy: .public)")
-                try? disableVirtualMirror(for: snapshot.targetDisplayID)
+                try? teardownVirtualMirror(snapshot.targetDisplayID)
                 self.hasRollbackFailure = true
                 self.remainingSeconds = 0
                 return
@@ -276,36 +291,6 @@ public final class DisplayRecoveryManager: ObservableObject, @unchecked Sendable
         awaitingConfirmation = false
         currentSnapshot = nil
         Self.log.info("Display configuration rollback finished.")
-    }
-
-    private func restoreVirtualMirror(for id: CGDirectDisplayID, size: CGSize) throws {
-        if let restoreVirtualMirrorOverride {
-            try restoreVirtualMirrorOverride(id, size)
-            return
-        }
-        let targetW = max(1, Int(size.width.rounded()))
-        let targetH = max(1, Int(size.height.rounded()))
-        let expectedPixelW = max(targetW, targetW * 2)
-        let expectedPixelH = max(targetH, targetH * 2)
-        let virtualID = try VirtualDisplayService.shared.enableVirtualMirror(
-            for: id,
-            width: targetW,
-            height: targetH
-        )
-        let activeMode = CGDisplayCopyDisplayMode(virtualID)
-        guard activeMode?.width == targetW && activeMode?.height == targetH &&
-              activeMode?.pixelWidth == expectedPixelW && activeMode?.pixelHeight == expectedPixelH else {
-            throw VirtualDisplayError.modeVerificationFailed(
-                expectedWidth: targetW,
-                expectedHeight: targetH,
-                actualWidth: activeMode?.width ?? 0,
-                actualHeight: activeMode?.height ?? 0,
-                expectedPixelWidth: expectedPixelW,
-                expectedPixelHeight: expectedPixelH,
-                actualPixelWidth: activeMode?.pixelWidth ?? 0,
-                actualPixelHeight: activeMode?.pixelHeight ?? 0
-            )
-        }
     }
 
     /// Performs cleanup on application termination: rolls back unconfirmed changes and destroys virtual displays.

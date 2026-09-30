@@ -1079,13 +1079,13 @@ extension Strings {
         nativeHiDPI: "Natívne HiDPI",
         virtualHiDPI: "Virtuálne HiDPI",
         standardResolution: "Štandardné rozlíšenie (1x)",
-        recoveryRestoreFailed: "Predchádzajúci režim HiDPI sa nepodarilo obnoviť.",
-        recoveryRetry: "Skúsiť znova",
-        recoveryKeepCurrent: "Ponechať aktuálny režim",
         recoveryKeep: "Ponechať zmeny",
         recoveryRevert: "Vrátiť späť",
         recoveryCountdownTitle: "Potvrdiť nastavenia displeja",
         recoveryCountdownRemaining: { "Automatické vrátenie o \($0) s" },
+        recoveryFailedMessage: "Predchádzajúci režim HiDPI sa nepodarilo obnoviť",
+        recoveryRetry: "Skúsiť znova",
+        recoveryKeepCurrent: "Ponechať aktuálny režim",
         toggleHiDPICaption: "Prepnúť Retina HiDPI škálovanie"
     )
 }

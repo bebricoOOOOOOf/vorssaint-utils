@@ -1079,13 +1079,13 @@ extension Strings {
         nativeHiDPI: "ネイティブ HiDPI",
         virtualHiDPI: "仮想 HiDPI",
         standardResolution: "標準解像度 (1x)",
-        recoveryRestoreFailed: "以前のHiDPIモードを復元できませんでした。",
-        recoveryRetry: "再試行",
-        recoveryKeepCurrent: "現在のモードを維持",
         recoveryKeep: "設定を保持",
         recoveryRevert: "元に戻す",
         recoveryCountdownTitle: "このディスプレイ設定を保持しますか？",
         recoveryCountdownRemaining: { "\($0)秒後に自動で元に戻します" },
+        recoveryFailedMessage: "以前の HiDPI モードを復元できませんでした",
+        recoveryRetry: "再試行",
+        recoveryKeepCurrent: "現在のモードを維持",
         toggleHiDPICaption: "Retina HiDPI スケーリングの切り替え"
     )
 }
