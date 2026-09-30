@@ -797,14 +797,18 @@ final class AppVolumeMixer: ObservableObject {
         guard #available(macOS 14.4, *), let token = builds.begin(app.id) else { return }
 
         if MixerRoutingSupport.isAirPlaySentinel(targetOutputDeviceUID) {
+            guard let attempt = AirPlayRouteManager.streamAttempt else {
+                builds.finish(app.id, token: token)
+                return
+            }
             let clockUID = clockDeviceUIDForAirPlayTap()
             buildQueue.async { [weak self] in
                 // No renderer, no stream: the app stays on its current path
                 // instead of being tapped into silence, and this is not a
                 // missing permission, so the permission hint stays hidden.
-                guard AirPlayRouteManager.shared.prepareToStream() else {
+                guard AirPlayRouteManager.shared.prepareToStream(for: attempt) else {
                     DispatchQueue.main.async {
-                        self?.finishUnavailableAirPlayBuild(for: app.id, token: token)
+                        self?.finishUnavailableAirPlayBuild(for: app.id, token: token, attempt: attempt)
                     }
                     return
                 }
@@ -843,10 +847,12 @@ final class AppVolumeMixer: ObservableObject {
     /// An AirPlay build that could not get a renderer ends here, not in
     /// `install`: whatever already plays the app keeps playing it, and the
     /// permission hint (which `install` shows for a failed tap) stays hidden.
-    private func finishUnavailableAirPlayBuild(for id: String, token: Int) {
+    private func finishUnavailableAirPlayBuild(for id: String, token: Int, attempt: AirPlayStreamAttempt) {
+        let current = builds.isCurrent(id, token: token)
         builds.finish(id, token: token)
+        guard current, !stopped else { return }
         // Shown as unavailable from now on, and not retried on every pass.
-        AirPlayRouteManager.shared.reportStreamingFailure()
+        AirPlayRouteManager.shared.reportStreamingFailure(for: attempt)
     }
 
     private func clockDeviceUIDForAirPlayTap() -> String {

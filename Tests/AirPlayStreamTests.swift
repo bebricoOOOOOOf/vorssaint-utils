@@ -494,3 +494,60 @@ enum AirPlayBacklogContract {
                      "a normal amount of buffered audio is played in full")
     }
 }
+
+
+/// Late AVFoundation errors cannot mute a new renderer or a new selection.
+/// A failed renderer on the live selection forces the same fallback as a
+/// disconnected speaker, even if the private context still reports a device.
+enum AirPlayRendererFailureContract {
+    static func run(_ suite: TestSuite) {
+        let first = AirPlayStreamAttempt(generation: 1, speakerName: "Speaker")
+        let repicked = AirPlayStreamAttempt(generation: 2, speakerName: "Speaker")
+        let other = AirPlayStreamAttempt(generation: 3, speakerName: "Other")
+        func action(_ activeRenderer: Int?, _ current: AirPlayStreamAttempt?) -> AirPlayFailureRecovery.Action {
+            AirPlayFailureRecovery.action(failedRenderer: 7, activeRenderer: activeRenderer,
+                                          failedAttempt: first, currentAttempt: current)
+        }
+        suite.expect(action(7, first) == .fallback, "a live renderer failure forces fallback even with a connected speaker")
+        suite.expect(action(8, first) == .ignore, "an old renderer cannot stop its replacement")
+        suite.expect(action(nil, first) == .ignore, "a stopped renderer's late notification is ignored")
+        suite.expect(action(7, nil) == .ignore, "a notification after mixer deactivation is ignored")
+        suite.expect(action(7, repicked) == .restart, "picking the same speaker again is a new attempt")
+        suite.expect(action(7, other) == .restart, "an old selection's failure retries rather than disables the new speaker")
+
+        let connected = AirPlayAvailability.isConnected(hasDevice: true, speakerName: first.speakerName,
+                                                        failedSpeakerName: first.speakerName)
+        let uid = AirPlayRouteManager.airPlaySentinelUID
+        let outputs = MixerRoutingSupport.routableOutputUIDs([uid, "LocalOutput"], airPlayConnected: connected)
+        suite.expect(MixerRoutingSupport.effectiveDeviceUID(selectedUID: uid, availableUIDs: outputs,
+                                                            defaultUID: "LocalOutput") == "LocalOutput",
+                     "renderer failure releases the AirPlay route despite the context retaining its device")
+
+        let failure = AirPlayRendererFailure()
+        let group = DispatchGroup()
+        final class Reports: @unchecked Sendable {
+            private let lock = NSLock()
+            private var count = 0
+            func increment() { lock.lock(); count += 1; lock.unlock() }
+            var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+        }
+        let reports = Reports()
+        for _ in 0..<32 {
+            group.enter()
+            DispatchQueue.global().async {
+                if failure.claim() { reports.increment() }
+                group.leave()
+            }
+        }
+        suite.expect(group.wait(timeout: .now() + 2) == .success, "concurrent renderer failure reports finish")
+        suite.expect(reports.value == 1, "KVO and feed failures are delivered once")
+
+        var builds = MixerEngineBuilds()
+        let stale = builds.begin("app.first")!
+        builds.invalidateAll()
+        let replacement = builds.begin("app.first")!
+        suite.expect(!builds.isCurrent("app.first", token: stale), "an invalidated failed build is not current")
+        builds.finish("app.first", token: stale)
+        suite.expect(builds.isCurrent("app.first", token: replacement), "finishing an old failure preserves the new build")
+    }
+}

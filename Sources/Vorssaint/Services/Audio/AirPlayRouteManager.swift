@@ -37,6 +37,16 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private static var snapshotIsListed = false
     private static var snapshotSpeakerName: String?
     private static var snapshotIsConnected = false
+    private static var snapshotRouteGeneration = 0
+
+    /// A build or failure belongs to this selection, including a fresh pick of
+    /// the same speaker. Never let a late result disable a later selection.
+    static var streamAttempt: AirPlayStreamAttempt? {
+        snapshotLock.lock()
+        defer { snapshotLock.unlock() }
+        guard snapshotIsListed, snapshotIsConnected, let name = snapshotSpeakerName else { return nil }
+        return AirPlayStreamAttempt(generation: snapshotRouteGeneration, speakerName: name)
+    }
 
     /// True while the mixer is running and AirPlay can actually be streamed to.
     static var isListed: Bool {
@@ -136,6 +146,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         Self.snapshotLock.lock()
         Self.snapshotIsListed = false
         Self.snapshotIsConnected = false
+        Self.snapshotRouteGeneration += 1
         Self.snapshotLock.unlock()
     }
 
@@ -287,6 +298,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
         cachedIsConnected = connected
         cachedSpeakerName = name
         Self.snapshotLock.lock()
+        if nameChanged { Self.snapshotRouteGeneration += 1 }
         Self.snapshotSpeakerName = name
         Self.snapshotIsConnected = connected
         Self.snapshotLock.unlock()
@@ -315,6 +327,7 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     // MARK: - Per-App AirPlay Streaming
 
     private var airPlayRenderer: AirPlayRenderer?
+    private var rendererGeneration = 0
     private let mixerSource = MixingAudioSource()
     private lazy var streams = AirPlayStreamRegistry(mixer: mixerSource)
     private let streamLock = NSLock()
@@ -361,17 +374,19 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     private var streamingFailedFor: String?
 
     /// Main thread: a build could not get a renderer.
-    func reportStreamingFailure() {
+    func reportStreamingFailure(for attempt: AirPlayStreamAttempt) {
         dispatchPrecondition(condition: .onQueue(.main))
-        streamingFailedFor = cachedSpeakerName ?? ""
+        guard attempt == Self.streamAttempt else { return }
+        streamingFailedFor = attempt.speakerName
         refreshActiveDevice()
     }
 
     /// Makes sure a renderer is running before an engine taps its app, so a
     /// failure here never mutes the app or reads as a missing permission.
-    func prepareToStream() -> Bool {
+    func prepareToStream(for attempt: AirPlayStreamAttempt) -> Bool {
         streamLock.lock()
         defer { streamLock.unlock() }
+        guard attempt == Self.streamAttempt else { return false }
         startRendererIfNeeded()
         return airPlayRenderer != nil
     }
@@ -395,10 +410,43 @@ final class AirPlayRouteManager: NSObject, ObservableObject {
     }
 
     private func startRendererIfNeeded() {
-        guard airPlayRenderer == nil else { return }
-        guard let renderer = AirPlayRenderer(source: mixerSource, manager: self) else { return }
-        renderer.start()
+        guard airPlayRenderer == nil, let attempt = Self.streamAttempt else { return }
+        rendererGeneration += 1
+        let generation = rendererGeneration
+        guard let renderer = AirPlayRenderer(source: mixerSource, manager: self, onFailure: { [weak self] in
+            // Keep the selection that created this renderer. A late KVO
+            // failure must not adopt a route picked before the callback.
+            // Leave the feed queue before stopping it or publishing state.
+            DispatchQueue.main.async { [weak self] in
+                self?.rendererFailed(generation: generation, attempt: attempt)
+            }
+        }) else { return }
         self.airPlayRenderer = renderer
+        renderer.start()
+    }
+
+    private func rendererFailed(generation: Int, attempt: AirPlayStreamAttempt) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        streamLock.lock()
+        let action = AirPlayFailureRecovery.action(
+            failedRenderer: generation, activeRenderer: airPlayRenderer == nil ? nil : rendererGeneration,
+            failedAttempt: attempt, currentAttempt: Self.streamAttempt)
+        switch action {
+        case .ignore:
+            streamLock.unlock()
+        case .restart:
+            // A failed renderer cannot be kept, even when its notification
+            // belonged to the previous selection. Retry the new selection
+            // with a fresh renderer rather than marking it failed as well.
+            stopRenderer()
+            if !streams.isEmpty { startRendererIfNeeded() }
+            streamLock.unlock()
+        case .fallback:
+            stopRenderer()
+            streamLock.unlock()
+            // The context can still list a speaker that no longer renders.
+            reportStreamingFailure(for: attempt)
+        }
     }
 
     private func stopRenderer() {
@@ -416,6 +464,39 @@ enum AirPlayPrivateAPI {
     static func string(_ object: NSObject, _ key: String) -> String? {
         guard object.responds(to: NSSelectorFromString(key)) else { return nil }
         return object.value(forKey: key) as? String
+    }
+}
+
+/// Identifies one routing selection without calling private objects off-main.
+struct AirPlayStreamAttempt: Equatable, Sendable {
+    let generation: Int
+    let speakerName: String
+}
+
+/// The failure owner must still exist. A later selection gets a fresh
+/// renderer; only a failure of the current selection sends apps to fallback.
+enum AirPlayFailureRecovery {
+    enum Action: Equatable { case ignore, restart, fallback }
+
+    static func action(failedRenderer: Int, activeRenderer: Int?,
+                       failedAttempt: AirPlayStreamAttempt, currentAttempt: AirPlayStreamAttempt?) -> Action {
+        guard activeRenderer == failedRenderer, let currentAttempt else { return .ignore }
+        return failedAttempt == currentAttempt ? .fallback : .restart
+    }
+}
+
+/// AVFoundation status is KVO observable and may fail after the first enqueue.
+/// Coalesces concurrent KVO/feed reports so one failure has one owner.
+final class AirPlayRendererFailure: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reported = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !reported else { return false }
+        reported = true
+        return true
     }
 }
 
@@ -863,9 +944,13 @@ final class AirPlayRenderer: @unchecked Sendable {
     private let framesPerChunk = 2_048
     private var started = false
     private var nextPTS = CMTime.zero
+    private let failure = AirPlayRendererFailure()
+    private let onFailure: () -> Void
+    private var statusObservation: NSKeyValueObservation?
 
-    init?(source: MixingAudioSource, manager: AirPlayRouteManager) {
+    init?(source: MixingAudioSource, manager: AirPlayRouteManager, onFailure: @escaping () -> Void) {
         self.source = source
+        self.onFailure = onFailure
 
         var asbd = AudioStreamBasicDescription(
             mSampleRate: 44_100,
@@ -893,6 +978,11 @@ final class AirPlayRenderer: @unchecked Sendable {
         started = true
         nextPTS = CMTime.zero
 
+        // Apple's renderer status transitions asynchronously after enqueue;
+        // a successful context setter is not evidence that audio is rendering.
+        statusObservation = renderer.observe(\.status, options: [.initial, .new]) { [weak self] renderer, _ in
+            if renderer.status == .failed { self?.reportFailure() }
+        }
         synchronizer.setRate(1.0, time: .zero)
         feed.start { [weak self] in
             self?.provide()
@@ -905,6 +995,8 @@ final class AirPlayRenderer: @unchecked Sendable {
         guard started else { return }
         started = false
         feed.stop()
+        statusObservation?.invalidate()
+        statusObservation = nil
         renderer.flush()
         synchronizer.rate = 0
     }
@@ -913,7 +1005,12 @@ final class AirPlayRenderer: @unchecked Sendable {
 
     private let targetLookahead = 0.75
 
+    private func reportFailure() {
+        if failure.claim() { onFailure() }
+    }
+
     private func provide() {
+        guard renderer.status != .failed else { reportFailure(); return }
         // A feed that fell behind the playback clock would enqueue late
         // chunks back to back; restart the timeline just ahead of it instead.
         let now = synchronizer.currentTime()
@@ -926,6 +1023,7 @@ final class AirPlayRenderer: @unchecked Sendable {
 
             guard let buffer = makeSampleBuffer() else { break }
             renderer.enqueue(buffer)
+            guard renderer.status != .failed else { reportFailure(); return }
         }
     }
 
@@ -971,6 +1069,9 @@ extension AirPlayRouteManager: AVRoutePickerViewDelegate {
     func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
         // Picking again is a fresh try at streaming.
         streamingFailedFor = nil
+        Self.snapshotLock.lock()
+        Self.snapshotRouteGeneration += 1
+        Self.snapshotLock.unlock()
         Self.isPresentingPicker = true
         Self.hasPresentedPicker = true
     }
