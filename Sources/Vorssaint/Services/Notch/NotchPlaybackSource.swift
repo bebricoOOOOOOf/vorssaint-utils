@@ -74,6 +74,10 @@ struct NotchPlaybackSource: Equatable {
         // source is playing. Without a track, the automatic order fills in.
         if let selection, let chosen = available.first(where: { $0.selection == selection }) { return chosen }
         let music = available.filter(\.isMusicApp)
+        // When another app owns the current media session, follow its playing
+        // metadata instead of letting an older playing music source take over.
+        if let current = available.first(where: { $0.pid == systemPID && $0.isPlaying
+            && ($0.isMusicApp || includeOtherPlayers) }) { return current }
         // In the opt-in mode, other apps still need system ownership or an
         // existing follow relationship before automatic selection.
         let other = includeOtherPlayers ? available.filter {

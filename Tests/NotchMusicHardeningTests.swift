@@ -569,6 +569,10 @@ enum NotchMusicHardeningTests {
         suite.expect(choose([idleBrowser, paused]) == paused, "reopening the music surface can still reach paused music")
         suite.expect(choose([browser, paused, other], previous: 10) == other,
                "playing music still outranks a playing browser and a paused music app")
+        suite.expect(choose([music, browser], previous: 10, system: 20, includeOtherPlayers: true) == browser,
+               "a playing current browser session takes priority over stale music metadata")
+        suite.expect(choose([music, browser], previous: 20, system: 10, includeOtherPlayers: true) == music,
+               "the current music session keeps priority while another app is also playing")
         // A music app open but stopped, a video playing in the browser: the
         // island used to go blank, since paused music outranked everything.
         suite.expect(choose([paused, browser], previous: nil, system: 20, includeOtherPlayers: true) == browser,

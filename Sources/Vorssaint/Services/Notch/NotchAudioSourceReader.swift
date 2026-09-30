@@ -90,8 +90,8 @@ final class NotchAudioSourceReader: @unchecked Sendable {
             }
             var running: UInt32 = 0
             var pid: pid_t = 0
-            guard Self.read(object, kAudioProcessPropertyIsRunningOutput, &running), running != 0,
-                  Self.read(object, kAudioProcessPropertyPID, &pid), pid > 0,
+            guard Self.readOutput(object, &running), running != 0,
+                  Self.readPID(object, &pid), pid > 0,
                   let app = ResponsibleProcess.regularAppOwner(of: pid), !app.isTerminated,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
                   let bundle = app.bundleIdentifier, NotchPlaybackCommand.validIdentifier(bundle),
@@ -128,9 +128,15 @@ final class NotchAudioSourceReader: @unchecked Sendable {
                                    mElement: kAudioObjectPropertyElementMain)
     }
 
-    private static func read<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T) -> Bool {
-        var address = address(selector)
-        var size = UInt32(MemoryLayout<T>.size)
+    private static func readOutput(_ object: AudioObjectID, _ value: inout UInt32) -> Bool {
+        var address = address(kAudioProcessPropertyIsRunningOutput)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr
+    }
+
+    private static func readPID(_ object: AudioObjectID, _ value: inout pid_t) -> Bool {
+        var address = address(kAudioProcessPropertyPID)
+        var size = UInt32(MemoryLayout<pid_t>.size)
         return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr
     }
 }
