@@ -80,4 +80,3 @@ struct NotchPlaybackSource: Equatable {
         return includeOtherPlayers ? available.first { $0.pid == systemPID } : nil
     }
 }
-

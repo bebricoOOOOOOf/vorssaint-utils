@@ -946,4 +946,3 @@ enum NotchMusicHardeningTests {
                "the recording revision survives the adapter reply without depending on UUID letter case")
     }
 }
-
