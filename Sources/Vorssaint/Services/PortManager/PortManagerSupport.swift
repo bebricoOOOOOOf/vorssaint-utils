@@ -32,6 +32,9 @@ enum PortManagerSupport {
         components.port = entry.port
         return components.url
     }
+    /// Keep TCP limited to listeners while including bound UDP sockets, which
+    /// have no LISTEN state on macOS.
+    static let lsofArguments = ["-nP", "+c0", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-F", "pcnPT"]
 
     /// Whether an lsof endpoint such as `*:3000` or `127.0.0.1:3000` is bound
     /// to every interface rather than one specific address. A wildcard bind
