@@ -126,6 +126,14 @@ enum AgentLogParser {
             state.turnOpen = false
             return open ? [.turnEnded(nil, completed: false, duration: nil)] : []
         }
+        // A tool that ends the turn, like the structured output a scripted
+        // session returns, gets no reply after its result: the session is done.
+        if contains(line, #""toolEndsTurn":true"#), let json = object(line), json["type"] as? String == "user",
+           json["toolEndsTurn"] as? Bool == true, json["isSidechain"] as? Bool != true {
+            let open = state.turnOpen
+            state.turnOpen = false
+            return open ? [.turnEnded(timestamp(json["timestamp"]) ?? now, completed: true, duration: nil)] : []
+        }
         // Tool results arrive inside a turn and can be large; while a turn is
         // open, the line only has to say that work goes on.
         if state.turnOpen { return [.turnActive(nil)] }

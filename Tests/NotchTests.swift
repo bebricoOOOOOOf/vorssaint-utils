@@ -424,7 +424,7 @@ enum NotchTests {
         }
         // Issue: a one-word reply beside a long sender left a band of empty
         // black after the word; each side now takes only what it shows.
-        let reply = banner(app: "WhatsApp", "+55 11 98945-8910", "Oi")
+        let reply = banner("+55 11 90000-0000", "Oi")
         suite.expect(reply.preferredWings.trailing == max(layout.wingRange.lowerBound,
                                                           width("Oi", layout.messageFont).rounded(.up) + layout.inset + layout.air)
                      && reply.preferredWings.trailing < reply.preferredWings.leading
@@ -928,21 +928,6 @@ enum NotchTests {
         }
         suite.expect(stripIsBlack(islandHeight: previewStrip + 62) && stripIsBlack(islandHeight: 400),
                "the strip stays black at every island height, tall or at the preview's")
-        // Liquid Glass is clear, not blurred: the page keeps black over it and
-        // only the margin below the page opens into the lip.
-        for height: CGFloat in [96, 180, 210, 284, 400, 640] {
-            let stops = NotchGlassLip.stops(height: height, openness: 1, increasedContrast: false)
-            let pageEnd = Double((height - NotchLayout.bottomInset) / height)
-            suite.expect(stops.filter { $0.location <= pageEnd + 1e-9 }.allSatisfy { $0.opacity == 1 }
-                         && abs(stops.last!.opacity - (1 - NotchGlassLip.transparency)) < 1e-9
-                         && zip(stops, stops.dropFirst()).allSatisfy { $1.opacity <= $0.opacity + 1e-12 },
-                         "a \(Int(height))-point glass island keeps its page over black and opens only the margin below it")
-        }
-        suite.expect(NotchGlassLip.stops(height: 284, openness: 0, increasedContrast: false).allSatisfy { $0.opacity == 1 }
-                     && abs(NotchGlassLip.opacity(atDepth: 284, height: 284, openness: 1, increasedContrast: true)
-                            - (1 - NotchGlassLip.increasedContrastTransparency)) < 1e-9
-                     && NotchGlassLip.increasedContrastTransparency < NotchGlassLip.transparency,
-                     "a closing glass island is black throughout, and Increase Contrast keeps its lip darker")
 
         NotchMissionControlPollingTests.run(suite)
         activitySelectionContracts(suite)

@@ -77,6 +77,7 @@ enum CommandBarFeatureTests {
         CommandBarTerminationContract.run(suite)
         CommandBarAppSortContract.run(suite)
         CommandBarKillProcessOrderContract.run(suite)
+        CommandBarDropletContract.run(suite)
         let isCodeLine: (String) -> Bool = {
             !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
         }
@@ -225,6 +226,83 @@ enum CommandBarFeatureTests {
             "macSettings", "snippets", "clipboard", "emoji", "folders", "answers", "calculator",
             "selection", "links", "files", "killProcess",
         ], "source ids are stable (they persist inside the disabled list)")
+        // The four rows that open another category are built as the app's
+        // own actions, but they carry that category's prefix, so a filter on
+        // the prefix alone drops them: the same rows turn up in the empty bar
+        // and in typed search, which never ask for a source, and nothing in
+        // the bar says the Actions list is narrower.
+        let actionEntriesCode = commandBarCatalogLines.firstIndex {
+            isCodeLine($0) && $0.contains("private static func actionEntries(")
+        }.map {
+            commandBarCatalogLines[$0...]
+                .prefix { !$0.contains("private static func settingsEntries(") }
+                .filter(isCodeLine)
+                .joined(separator: "\n")
+        } ?? ""
+        let actionBrowseIDs: Set<String> = [
+            CommandBarPreferences.emojiBrowserRowID,
+            CommandBarPreferences.killProcessBrowserRowID,
+            "uninstall.browse", "uninstall.finder",
+        ]
+        suite.expect(CommandBarPreferences.actionBrowseRowIDs == actionBrowseIDs
+                && actionEntriesCode.contains("id: \"uninstall.browse\"")
+                && actionEntriesCode.contains("id: \"uninstall.finder\"")
+                && actionEntriesCode.contains("id: CommandBarPreferences.emojiBrowserRowID")
+                && actionEntriesCode.contains("id: CommandBarPreferences.killProcessBrowserRowID"),
+               "the app's own actions build all four rows that open another category, and the actions list names every one of them")
+        suite.expect(Set(actionBrowseIDs.map(CommandBarPreferences.source(ofRowID:)))
+                    == [.uninstallApps, .emoji, .killProcess]
+                && actionBrowseIDs.allSatisfy(CommandBarPreferences.isActionRow),
+               "a row is filed under the category it opens, so the actions list has to admit a navigation row by name and not by prefix")
+        suite.expect(CommandBarPreferences.isActionRow("action.cleaner")
+                && !CommandBarPreferences.isActionRow("app.Safari")
+                && !CommandBarPreferences.isActionRow("settings.appearance")
+                && !CommandBarPreferences.isActionRow("emoji.grin"),
+               "naming the navigation rows widens the actions list to them alone and leaves every other category exactly where it was")
+        // A navigation row is the app's own action, but what it opens is a
+        // category the person may have switched off. The empty bar and the
+        // search pool both drop a row whose source is off, so the Actions
+        // list has to drop it with them, or the one surface that still offers
+        // it is the one that can run it.
+        let emojiSwitchedOff = CommandBarPreferences.disabledSources(from: "emoji")
+        suite.expect(!CommandBarPreferences.isActionRow(
+                    CommandBarPreferences.emojiBrowserRowID, disabled: emojiSwitchedOff)
+                && CommandBarPreferences.isActionRow(
+                    CommandBarPreferences.emojiBrowserRowID, disabled: []),
+               "the row that opens the emoji browser leaves the actions list while emoji is switched off, and returns when it is switched back on")
+        let killSwitchedOff = CommandBarPreferences.disabledSources(from: "killProcess")
+        suite.expect(!CommandBarPreferences.isActionRow(
+                    CommandBarPreferences.killProcessBrowserRowID, disabled: killSwitchedOff)
+                && CommandBarPreferences.isActionRow("action.cleaner", disabled: killSwitchedOff),
+               "the row that opens the kill process browser leaves the actions list while that source is switched off, and an action of the app's own cannot be switched off")
+        suite.expect(actionBrowseIDs.allSatisfy {
+            CommandBarPreferences.isActionRow($0, disabled: emojiSwitchedOff)
+                || CommandBarPreferences.isActionRow($0, disabled: killSwitchedOff)
+        } && !actionBrowseIDs.contains {
+            CommandBarPreferences.isActionRow(
+                $0, disabled: CommandBarPreferences.disabledSources(
+                    from: "uninstallApps,emoji,killProcess"))
+        },
+               "a navigation row whose destination is still on stays in the actions list, and a category whose navigation rows are all switched off is left with nothing to show")
+        // The rule above only reaches the bar if the Actions list and its chip
+        // both ask it with the sources the person switched off. Each body ends
+        // at the next declaration, so a renamed or moved site fails here
+        // instead of passing on some other part of the file.
+        let actionsServiceCode = ((try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarService.swift",
+            encoding: .utf8)) ?? "")
+            .components(separatedBy: "\n")
+            .filter(isCodeLine)
+            .joined(separator: "\n")
+        for function in ["categoryHasContent", "categoryContent"] {
+            let parts = (actionsServiceCode
+                .components(separatedBy: "private func \(function)(").last ?? "")
+                .components(separatedBy: "\n    private func ")
+            suite.expect(parts.count > 1
+                    && (parts.first ?? "").contains(
+                        "CommandBarPreferences.isActionRow($0.id, disabled: disabledCache)"),
+                   "\(function) answers the actions list with the sources the person switched off, the same ones the empty bar and search drop")
+        }
         suite.expect(CommandBarSource.actions.isAlwaysOn
                 && CommandBarSource.allCases.filter(\.isAlwaysOn).count == 1,
                "only the app's own actions cannot be switched off")
@@ -2354,5 +2432,78 @@ enum CommandBarKillProcessOrderContract {
             suite.expect(service.killProcessEntries == expected,
                          "the Command Bar lists processes in the Kill Process page's \(sort) order, found \(service.killProcessEntries)")
         }
+    }
+}
+
+/// The drop that carries the bar out of the island answers the person while
+/// it falls: typing hurries it, and closing it sends it back up the way it
+/// came instead of making it vanish. Each body is cut at the next
+/// declaration, so a moved or renamed site fails here.
+enum CommandBarDropletContract {
+    static func run(_ suite: TestSuite) {
+        func code(_ path: String) -> String {
+            ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+                .components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+        }
+        func body(_ source: String, _ signature: String) -> String {
+            let parts = source.components(separatedBy: signature)
+            guard parts.count > 1 else { return "" }
+            return parts[1].components(separatedBy: "\n    func ").first?
+                .components(separatedBy: "\n    private func ").first ?? ""
+        }
+        let droplet = code("Sources/Vorssaint/UI/CommandBar/CommandBarDroplet.swift")
+        let view = code("Sources/Vorssaint/UI/CommandBar/CommandBarView.swift")
+
+        let typing = view.components(separatedBy: ".onChange(of: service.query) { _, query in").dropFirst().first ?? ""
+        suite.expect((typing.components(separatedBy: "}").first ?? "")
+                        .contains("if !query.isEmpty, service.presentation == .droplet { CommandBarDroplet.shared.hurry("),
+                     "typing while the drop falls hurries it")
+
+        let service = code("Sources/Vorssaint/Services/CommandBar/CommandBarService.swift")
+        let monitor = service.components(separatedBy: "keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown)")
+            .dropFirst().first ?? ""
+        let early = monitor.range(of: "if self.presentation == .droplet, event.keyCode != 53 { CommandBarDroplet.shared.hurry() }")
+        let composing = monitor.range(of: "if self.fieldIsComposing(in: panel) { return event }")
+        suite.expect(early != nil && composing != nil && early!.lowerBound < composing!.lowerBound,
+                     "a key while the drop falls shows the bar before the field or its search takes the key")
+        let shows = service.components(separatedBy: "CommandBarDroplet.shared.drop(from: island").dropFirst().first?
+            .components(separatedBy: "\n            return\n").first ?? ""
+        suite.expect(shows.contains("panel.alphaValue = 1") && shows.contains("layer.add(appear, forKey: \"appear\")")
+                     && !shows.contains("animator()"),
+                     "the bar shows at once and fades in through Core Animation, not through main thread alpha steps")
+
+        let hurry = body(droplet, "func hurry() {")
+        suite.expect(hurry.contains("guard falling, let fall, let reveal else { return }")
+                     && hurry.contains("generation += 1") && hurry.contains("stage.removeAnimation(forKey: \"reveal\")")
+                     && hurry.contains("fall.motion.remainder(from:") && hurry.contains("reveal(length)")
+                     && hurry.contains("fadeOut(current, duration: length)") && hurry.contains("CATransaction.flush()")
+                     && hurry.contains("mascot.root.opacity = 0"),
+                     "typing as the drop falls shows the bar at once and plays the rest of the fall under it")
+
+        let retract = body(droplet, "func retract(from bar: CGRect, look: NotchMascotLook, mood: NotchMascotMood) {")
+        let rewindCall = retract.range(of: "if falling, !Self.reducesMotion, rewind(homecoming: mood) { return }")
+        let cancelCall = retract.range(of: "cancel()")
+        suite.expect(rewindCall != nil && cancelCall != nil && rewindCall!.lowerBound < cancelCall!.lowerBound,
+                     "closing a drop that still falls rewinds it before anything cancels it")
+
+        let rewind = body(droplet, "private func rewind(homecoming mood: NotchMascotMood) -> Bool {")
+        suite.expect(rewind.contains("generation += 1") && rewind.contains("stage.removeAnimation(forKey: \"reveal\")")
+                     && rewind.contains("fall.motion.rewound(from:")
+                     && rewind.contains("self.panel?.orderOut(nil)")
+                     && rewind.contains("NotchService.shared.setMascotInBar(false, homecoming: mood)"),
+                     "a rewound drop never shows the bar, rises as motion of its own and brings the companion home")
+        // Played backward through the layer's clock, Core Animation drops the
+        // fill before the first frame and the bar's shape flashes. The way
+        // back is a motion of its own instead.
+        suite.expect(!droplet.contains(".speed") && !droplet.contains("timeOffset"),
+                     "no drop plays by changing the layer's clock")
+
+        let reveal = droplet.components(separatedBy: "self.falling = false").dropFirst().first ?? ""
+        let shown = reveal.range(of: "revealed(0)")
+        let fade = reveal.range(of: "self.fadeOut(current)")
+        suite.expect(shown != nil && fade != nil && shown!.lowerBound < fade!.lowerBound,
+                     "a landed drop hands over to the bar as is, then fades off it")
     }
 }

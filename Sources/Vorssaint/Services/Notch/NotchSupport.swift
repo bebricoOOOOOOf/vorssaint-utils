@@ -160,9 +160,11 @@ struct NotchCameraFit: Equatable {
 /// A capsule sized and placed by hand. By itself it takes the height of the
 /// menu bar around it; a fit makes it wider or narrower at rest, taller or
 /// shorter from its top edge, and lowers it from the top of the display.
+/// Width and height reach as far each way, so an untouched slider rests in
+/// the middle, as the camera fit's do.
 struct NotchCapsuleFit: Equatable {
-    static let widthRange = -40.0...80.0
-    static let heightRange = -4.0...12.0
+    static let widthRange = -40.0...40.0
+    static let heightRange = -4.0...4.0
     static let dropRange = 0.0...20.0
     static let zero = NotchCapsuleFit(width: 0, height: 0, drop: 0)
 
@@ -425,7 +427,7 @@ enum NotchLayout {
     /// Square artwork, its gap, the three compact transport buttons, and
     /// horizontal padding. Track titles truncate within the remaining space.
     static func musicCardMinimumWidth(height: CGFloat) -> CGFloat {
-        max(40, height - 24) + 12 + 120 + 24
+        max(40, height - 24) + 12 + 132 + 24
     }
 
     /// The home page: one row of cards (playback and levels) over a rail of
@@ -1701,7 +1703,7 @@ struct NotchGeometry: Equatable {
          menuBarHeight: CGFloat = 24, compactSideRoom: CGFloat? = nil,
          customWidth: Double = NotchSize.defaultWidth, customHeight: Double = NotchSize.defaultHeight,
          cameraFit: NotchCameraFit = .zero, silhouette: NotchSilhouette = .notch, capsuleFit: NotchCapsuleFit = .zero,
-         outline: Bool = false) {
+         outline: Bool = false, barEdge: CGFloat = 0) {
         self.screen = screen
         self.layout = layout
         self.customWidth = NotchSize.clamped(customWidth, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
@@ -1719,8 +1721,15 @@ struct NotchGeometry: Equatable {
         let capsuleFit = gap == nil ? NotchCapsuleFit.zero : capsuleFit
         floatingDrop = capsuleFit.drop
         capsuleWidthFit = capsuleFit.width
-        let stripHeight = gap.map { max(barHeight + capsuleFit.height, $0 * 2 + 12) } ?? barHeight
-        let profileHeight = gap.map { stripHeight - ($0 - NotchLayout.capsuleMargin) * 2 } ?? barHeight
+        // The bar ends in a hairline, `barEdge` thick, that reads as its edge:
+        // the capsule's margin below is measured from it, as the one above is
+        // from the top of the display, so the capsule shows centred in the
+        // bar. Its width keeps following the whole bar.
+        let edge = barEdge.isFinite ? min(max(0, barEdge), 1) : 0
+        let fullStrip = gap.map { max(barHeight + capsuleFit.height, $0 * 2 + 12) }
+        let stripHeight = gap.map { max(barHeight - edge + capsuleFit.height, $0 * 2 + 12) } ?? barHeight
+        let profileHeight = gap.flatMap { gap in fullStrip.map { $0 - (gap - NotchLayout.capsuleMargin) * 2 } }
+            ?? barHeight
         // A capsule's camera is only the room it keeps, on whole points.
         let simulated = 180 * profileHeight / 32
         // A simulated cutout sits on the menu bar, where its outline already shows.
@@ -1820,6 +1829,13 @@ struct NotchGeometry: Equatable {
         compact.compactSideRoom = room.isFinite && room >= wing ? min(isNotched ? wing : 56, room) : 0
         compact.minimumWing = wing
         return compact
+    }
+    /// The Lock Screen keeps no menus beside the camera, so its island always
+    /// takes the wings the music strip fits to the cover and the bars.
+    var lockScreenMusicGeometry: NotchGeometry {
+        var unobstructed = self
+        unobstructed.compactSideRoom = screen.width
+        return unobstructed.compactMusicGeometry
     }
     /// The cover takes the strip's height less an even gap above and below.
     var compactMusicArtworkSide: CGFloat {
@@ -2401,40 +2417,6 @@ enum NotchMenuBarLayout {
             if rect.minX >= camera.maxX { right = min(right, rect.minX - 8) }
         }
         return max(0, min(camera.minX - left, right - camera.maxX))
-    }
-}
-
-/// The dimming over the island's Liquid Glass, top to bottom. The glass is
-/// clear, not blurred, so wherever the black thins a window's text behind it
-/// reads through the island's own. The page and its cards stay over black,
-/// and only the margin below the page opens into the glass lip.
-enum NotchGlassLip {
-    /// The margin below the page, which holds no content.
-    static let depth = NotchLayout.bottomInset
-    /// How much of the glass the lip lets through at its lowest edge.
-    static let transparency = 0.45
-    static let increasedContrastTransparency = 0.10
-
-    static func opacity(atDepth depth: CGFloat, height: CGFloat,
-                        openness: Double, increasedContrast: Bool) -> Double {
-        let lipTop = height - Self.depth
-        guard depth > lipTop else { return 1 }
-        let ramp = Double(min(1, (depth - lipTop) / Self.depth))
-        let eased = ramp * ramp * (3 - 2 * ramp)
-        return 1 - min(1, max(0, openness))
-            * (increasedContrast ? increasedContrastTransparency : transparency) * eased
-    }
-
-    /// Gradient stops over an island `height` points tall, top to bottom.
-    static func stops(height: CGFloat, openness: Double,
-                      increasedContrast: Bool) -> [(location: Double, opacity: Double)] {
-        guard height > 0 else { return [(0, 1), (1, 1)] }
-        let lipTop = max(0, height - Self.depth)
-        let depths = [0, lipTop] + (1...8).map { lipTop + (height - lipTop) * CGFloat($0) / 8 }
-        return depths.map {
-            (Double($0 / height), opacity(atDepth: $0, height: height,
-                                          openness: openness, increasedContrast: increasedContrast))
-        }
     }
 }
 

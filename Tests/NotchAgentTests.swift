@@ -319,6 +319,24 @@ enum NotchAgentTests {
         _ = feed(line(#"{"type":"user","message":{"content":"<local-command-stdout>Set model</local-command-stdout>"}}"#))
         suite.expect(store.live.isEmpty, "a local command never leaves a turn working")
         _ = feed(claudeUser())
+        _ = feed(claudeAssistant(id: "msg_5", request: "req_5", stop: "tool_use", time: "2026-09-21T23:40:10.000Z"))
+        let structured = feed(line(#"{"type":"user","timestamp":"2026-09-21T23:40:15.000Z","sessionId":"s1","message":{"role":"user","content":[{"type":"tool_result","content":"Structured output provided successfully"}]},"toolUseResult":"Structured output provided successfully","toolEndsTurn":true}"#))
+        suite.expect(store.live.isEmpty && structured.contains { if case .finished = $0 { true } else { false } },
+                     "a tool that ends the turn finishes it without waiting for a reply")
+        suite.expect(feed(line(#"{"type":"user","timestamp":"2026-09-21T23:40:16.000Z","message":{"content":[{"type":"tool_result","content":"ok"}]},"toolEndsTurn":true}"#)).isEmpty
+                        && store.live.isEmpty, "a turn-ending tool result alone never opens a turn")
+        _ = feed(claudeUser())
+        _ = feed(claudeAssistant(id: "msg_6", request: "req_6", stop: "tool_use"))
+        _ = feed(line(#"{"type":"user","timestamp":"2026-09-21T23:43:00.000Z","message":{"content":[{"type":"tool_result","content":"\"toolEndsTurn\":true"}]},"toolEndsTurn":false}"#))
+        suite.expect(store.live.count == 1, "a tool result quoting the marker keeps the turn working")
+        // A subagent's own turn-ending tool, and a structured tool result
+        // that holds the marker deeper down, both leave the main turn open.
+        _ = feed(line(#"{"type":"user","isSidechain":true,"timestamp":"2026-09-21T23:43:01.000Z","message":{"content":[{"type":"tool_result","content":"done"}]},"toolEndsTurn":true}"#))
+        suite.expect(store.live.count == 1, "a subagent's turn-ending tool keeps the main turn working")
+        _ = feed(line(#"{"type":"user","timestamp":"2026-09-21T23:43:02.000Z","message":{"content":[{"type":"tool_result","content":"ok"}]},"toolUseResult":{"result":{"toolEndsTurn":true}}}"#))
+        suite.expect(store.live.count == 1, "a marker nested in a structured tool result keeps the turn working")
+        _ = feed(line(#"{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#))
+        _ = feed(claudeUser())
         suite.expect(feed(claudeAssistant(id: "msg_4", request: "req_4", model: "<synthetic>", stop: "stop_sequence",
                                           time: "2026-09-21T23:44:40.000Z")).isEmpty && store.live.isEmpty,
                      "an error written in place of a reply ends the turn without a finish notice")

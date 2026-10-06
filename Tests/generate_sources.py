@@ -129,11 +129,17 @@ def main():
           + "extension DisplayRestorationTests {\nfinal class BrightnessService: Fixture {\n"
           + declaration(brightness, "    enum DisplayControlFailure:")
           + "".join(declaration(brightness, prefix).replace("private ", "", 1) for prefix in [
+              "    private static func restorationDisplayFingerprint(",
+              "    private static func rememberDisplaySwitchedOff(",
+              "    private static func forgetDisplaySwitchedOff(",
               "    private static func configureDisplay(", "    private func restoreDisplay(",
+              "    private func canRestoreDisplay(",
               "    private func syncLidObserver(", "    private func restoreDeferredDisplays(",
               "    private func restoreManagedDisplays(", "    func restoreDisplaysLeftOff(",
               "    private func commitDisplayToggle(", "    private func finishDisplayToggle(",
-              "    private func restoreManagedDisplayIfHeadless("])
+              "    private func restoreManagedDisplayIfHeadless(",
+              "    private func recordDiscoveredTopology(", "    private func discardReplacedDisplay(",
+              "    private func displaysWokeUp("])
           + "}\n}\n")
     write("BrightnessStep.swift", "import CoreGraphics\nimport Foundation\nimport os\n"
           + "extension BrightnessStepTests {\n"
@@ -328,6 +334,16 @@ def main():
           + declaration("Sources/Vorssaint/Services/Finder/FinderCutPaste.swift", "    static func selectionURLs(")
           + "}\n")
     dock = "Sources/Vorssaint/Services/DockPreview/DockPreviewService.swift"
+    write("DockPreviewPosition.swift", "import CoreGraphics\nimport Foundation\n"
+          + "extension DockPreviewPositionTests.Service {\n"
+          + "".join(declaration(dock, prefix, scope="final class DockPreviewService:")
+                    .replace("private func", "func", 1)
+                    for prefix in ["    private func handleMouseMoved(",
+                                   "    private func currentZone(",
+                                   "    private func showPanel(",
+                                   "    private func resizePanelForCurrentWindows()",
+                                   "    private func clampedPanelFrame("])
+          + "}\n")
     write("DockPreviewFrameRetry.swift", "import Foundation\nextension DockPreviewFrameRestorationTests {\n"
           + declaration("Sources/Vorssaint/Services/DockPreview/DockPreviewFrameRestoration.swift",
                         "    private static func restore(").replace("private static func", "static func", 1)
@@ -596,6 +612,7 @@ def main():
               .replace("private struct", "struct", 1)
           + declaration("Sources/Vorssaint/UI/Notch/NotchComponents.swift", "struct NotchRail<")
           + declaration("Sources/Vorssaint/UI/PlainTextEditor.swift", "struct PlainTextEditor:")
+              .replace("        private func moveLine(", "        func moveLine(", 1)
           + declaration(scratchpad_view, "struct NotchScratchpadView:")
           + "}\n"
           + declaration("Sources/Vorssaint/UI/Notch/NotchCalendarView.swift", "extension NotchCalendarColor {")
@@ -796,6 +813,7 @@ def main():
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
           + declaration(notch, "    func openActivity(")
               .replace("UserDefaults.standard", "ReviewDefaults.current!")
+          + declaration(notch, "    func openCountdownEvent()")
           + declaration(notch, "    var reopeningModule:")
           + declaration(notch, "    private func updateSession(").replace("private func", "func", 1)
               .replace("AppFeature.mixer.isAvailable", "AppFeature.mixer.isAvailable(in: ReviewDefaults.current)")
@@ -986,7 +1004,7 @@ def main():
                                    "    func openEditor(with", "    func editorDidClose(",
                                    "    private func invalidateLatestCaptureUploads()",
                                    "    private func beginLatestCapture(", "    private func discardLatestCapture(",
-                                   "    private func syncLatestCapture("])
+                                   "    private func withholdLatestCapture()", "    private func syncLatestCapture("])
           + "}\n}\n")
     write("ScreenshotPreviewHover.swift", "import Foundation\n"
           + "extension ScreenshotPreviewHoverTests {\nfinal class Controller: State {\n"
@@ -1366,6 +1384,37 @@ def main():
 
     window_directional = "Sources/Vorssaint/Services/WindowLayout/WindowLayoutService.swift"
     window_gesture = "Sources/Vorssaint/Services/WindowLayout/WindowGestureSupport.swift"
+    write("WindowEdgeSnapRuntime.swift", "import AppKit\nimport CoreGraphics\nimport Foundation\n"
+          + "extension WindowEdgeSnapRuntimeTests {\n"
+          + "".join(declaration(window_directional, prefix).replace("private ", "", 1)
+                    for prefix in ["private enum WindowEdgeSnapPointerInput {",
+                                   "private struct WindowEdgeSnapDrag {",
+                                   "private struct WindowLayoutTarget {"])
+          + "final class Host: Fixture {\n"
+          + "".join(declaration(window_directional, prefix).replace("private ", "", 1)
+                    .replace("AXIsProcessTrusted()", "WindowEdgeSnapRuntimeTests.accessibilityGranted")
+                    for prefix in [
+              "    private func observeEdgeSnapEvent(",
+              "    private func handleEdgeSnapInput(",
+              "    private func applyDelayedEdgeSnapIfMoved(",
+              "    private func edgeSnapWindowFollowed(",
+              "    private func beginEdgeSnapResolve(",
+              "    private func resolveEdgeSnapWindow(",
+              "    private func makeEdgeSnapDrag(",
+              "    private func updateEdgeSnapDrag(",
+              "    private func applyEdgeSnap(",
+              "    private func cancelEdgeSnapTracking()"])
+          + "}\n}\n")
+    write("WindowGestureApplyRuntime.swift", "import AppKit\nimport CoreGraphics\nimport Foundation\n"
+          + "extension WindowGestureApplyRuntimeTests {\n"
+          + declaration(window_directional, "private struct WindowPointerGesture {").replace("private ", "", 1)
+          + "final class Host: Fixture {\n"
+          + "".join(declaration(window_directional, prefix).replace("private ", "", 1)
+                    for prefix in [
+              "    private func enqueueGestureApply(",
+              "    private func drainGestureApplies()",
+              "    private func flushGestureApplies()"])
+          + "}\n}\n")
     write("WindowDirectionalModifierRuntime.swift", "import AppKit\nimport CoreGraphics\nimport Foundation\n"
           + "extension WindowDirectionalModifierRuntimeTests {\n"
           + "".join(declaration(window_gesture, prefix) for prefix in [

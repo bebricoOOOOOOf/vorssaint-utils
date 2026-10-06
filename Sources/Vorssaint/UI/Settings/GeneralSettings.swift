@@ -47,8 +47,10 @@ struct GeneralSettings: View {
         SettingsCard {
             SettingsRow(symbol: "laptopcomputer", title: l10n.s.launchAtLogin,
                         caption: text.launchAtLoginCaption) {
+                // Waiting on approval it is still registered, so it reads on and
+                // switching it off unregisters it, which also clears the note.
                 Toggle(l10n.s.launchAtLogin, isOn: Binding(
-                    get: { loginRegistration == .enabled },
+                    get: { loginRegistration != .off },
                     set: { setLaunchAtLogin($0) }
                 ))
                     .labelsHidden()

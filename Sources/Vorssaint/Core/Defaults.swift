@@ -231,6 +231,9 @@ enum DefaultsKey {
     // Displays this app switched off, so a run that ends without putting them
     // back can be repaired on the next start instead of needing a replug.
     static let displaysSwitchedOff = "displaysSwitchedOff"
+    // Identity saved before disabling each display, kept separate so older
+    // versions can still read the repair list of display numbers.
+    static let displaysSwitchedOffFingerprints = "displaysSwitchedOffFingerprints"
     // Set while a start is under way and cleared once the app has run
     // healthily for a while, or when it is quit properly. Found still set at
     // the next start, it means the previous one died on the way up.
@@ -2051,11 +2054,13 @@ enum Defaults {
     /// On a beta, people with the Command Bar get the island's companion,
     /// which can be its face, installed and on, once: uninstalled afterwards,
     /// it stays out. A clean install waits for its setup to finish, since
-    /// setup picks the installed features afresh.
+    /// setup picks the installed features afresh. It lives in the island, so
+    /// someone without the island gets nothing.
     static func installsCompanionForBeta(in defaults: UserDefaults, isBeta: Bool = AppInfo.isBeta) -> Bool {
         isBeta && defaults.bool(forKey: DefaultsKey.hasOnboarded)
             && !defaults.bool(forKey: DefaultsKey.notchMascotBetaInstalled)
             && AppFeature.commandBar.isAvailable(in: defaults)
+            && AppFeature.notch.isAvailable(in: defaults)
     }
 
     static func installCompanionForBetaCommandBar(in defaults: UserDefaults, isBeta: Bool = AppInfo.isBeta) {
