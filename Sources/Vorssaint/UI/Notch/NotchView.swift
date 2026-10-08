@@ -206,7 +206,8 @@ struct NotchView: View {
                 let strip = service.compactStripSize(for: activity, companion: service.compactCompanion)
                 activityStrip(activity, size: strip)
                     .modifier(NotchMascotActivityVisit(service: service,
-                                                       track: service.mascotTrack(overActivityStrip: strip)))
+                                                       track: service.mascotTrack(overActivityStrip: strip),
+                                                       ownStrip: true))
                     .transition(companionSwap)
             }
         } else if let departingMusic = service.departingMusic ?? service.lingeringMusic {
@@ -241,7 +242,7 @@ struct NotchView: View {
             case .downloads: NotchCapsuleDownloadStrip(service: service, size: size)
             case .agents: NotchCapsuleAgentStrip(service: service, size: size)
             case .calendar: NotchCapsuleCalendarStrip(service: service, size: size)
-            case .music: NotchCapsuleMusicStrip(service: service, size: size)
+            case .music: NotchCapsuleMusicStrip(service: service, size: size, interactive: true)
             case .keepAwake: NotchCapsuleKeepAwakeStrip(service: service, size: size)
             }
         } else {
@@ -255,7 +256,7 @@ struct NotchView: View {
             case .downloads: NotchDownloadStrip(service: service, displayGeometry: geometry)
             case .agents: NotchAgentStrip(service: service, displayGeometry: geometry)
             case .calendar: NotchCalendarStrip(service: service, displayGeometry: geometry)
-            case .music: NotchMusicStrip(service: service, displayGeometry: geometry)
+            case .music: NotchMusicStrip(service: service, displayGeometry: geometry, interactive: true)
             case .keepAwake: NotchKeepAwakeStrip(service: service, displayGeometry: geometry)
             }
         }
@@ -331,9 +332,9 @@ struct NotchView: View {
         switch service.selected {
         case .controls:
             let items = NotchSupport.controls()
-            let shortcuts = items.filter { $0 != .music && $0 != .volume && $0 != .brightness }
+            let shortcuts = items.filter { $0 != .music && !$0.isLevel }
             size.height = max(size.height, NotchLayout.controls(
-                hasCards: items.contains(.music) || items.contains(.volume) || items.contains(.brightness),
+                hasCards: items.contains(.music) || items.contains(where: \.isLevel),
                 shortcutCount: shortcuts.count, width: size.width, height: size.height).height)
         case .timer:
             let session = NotchTimerService.shared.session
@@ -446,7 +447,16 @@ struct NotchView: View {
         }
         .frame(height: service.expandedGeometry.headerRowHeight)
         .contentShape(Rectangle())
-        .onHover { headerHovered = $0 }
+        // Each move reports, not only a crossing. After the watch below hides
+        // the actions, SwiftUI may still count the pointer as inside and would
+        // never report it entering again.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: if !headerHovered { headerHovered = true }
+            case .ended: headerHovered = false
+            }
+        }
+        .background { NotchHoverExitWatch(active: headerHovered) { headerHovered = false } }
         .onAppear { UpdateService.shared.checkIfStale() }
         // Collapsing under the pointer takes the row away without a final
         // hover(false); the next opening starts with the actions out of sight.
@@ -657,6 +667,63 @@ struct NotchView: View {
     }
 }
 
+/// AppKit reports hover from the moves the island's window receives, and the
+/// window server sends it none over the window's clear pixels. A pointer that
+/// left the header across them, above a floating capsule or toward the side
+/// buttons, was never reported gone, so the row's actions stayed in view.
+/// While the row reads as hovered, every move is checked against it here.
+private struct NotchHoverExitWatch: NSViewRepresentable {
+    let active: Bool
+    let exited: () -> Void
+
+    func makeNSView(context: Context) -> NotchHoverExitView { NotchHoverExitView() }
+    func updateNSView(_ view: NotchHoverExitView, context: Context) {
+        view.exited = exited
+        view.watch(active)
+    }
+    static func dismantleNSView(_ view: NotchHoverExitView, coordinator: ()) { view.watch(false) }
+}
+
+private final class NotchHoverExitView: NSView {
+    var exited: (() -> Void)?
+    private var monitors: [Any] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    deinit { monitors.forEach(NSEvent.removeMonitor) }
+
+    /// Nothing is watched at rest.
+    func watch(_ active: Bool) {
+        guard active else {
+            monitors.forEach(NSEvent.removeMonitor)
+            monitors.removeAll()
+            return
+        }
+        guard monitors.isEmpty else { return }
+        // A drag moves the pointer without mouse-moved events.
+        let moves: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
+        if let token = NSEvent.addGlobalMonitorForEvents(matching: moves, handler: { [weak self] _ in self?.check() }) {
+            monitors.append(token)
+        }
+        if let token = NSEvent.addLocalMonitorForEvents(matching: moves, handler: { [weak self] event in
+            self?.check()
+            return event
+        }) { monitors.append(token) }
+    }
+
+    private func check() {
+        // The pointer on a screen's top row reports y == maxY, which
+        // `contains` excludes and NSMouseInRect keeps.
+        guard let window,
+              !NSMouseInRect(NSEvent.mouseLocation, window.convertToScreen(convert(bounds, to: nil)), false) else { return }
+        exited?()
+    }
+}
+
 /// Observes the history on its own, so a new capture does not redraw the island.
 private struct NotchClearCapturesButton: View {
     @ObservedObject private var history = RecentCaptureService.shared
@@ -697,9 +764,32 @@ struct NotchRestingStrip: View {
     /// Another display's strip, when the island shows on every display.
     var displayGeometry: NotchGeometry? = nil
     @ObservedObject private var music = NotchMusicService.shared
+    @AppStorage(DefaultsKey.notchLowBatteryTint) private var lowBatteryTint = false
+    @AppStorage(DefaultsKey.notchLowBatteryThreshold) private var lowBatteryThreshold = NotchSupport.defaultLowBatteryThreshold
+    @AppStorage(DefaultsKey.notchLowBatteryEarly) private var earlyBatteryWarning = false
+    @AppStorage(DefaultsKey.notchLowBatteryEarlyThreshold) private var earlyBatteryThreshold = NotchSupport.defaultEarlyBatteryThreshold
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var geometry: NotchGeometry { displayGeometry ?? service.geometry }
+
+    /// Both halves of the charge turn amber, then red, together as it runs low.
+    private var batteryTint: Color {
+        switch NotchSupport.batteryWarning(percent: service.power.chargePercent,
+                                           externalConnected: service.power.externalConnected,
+                                           tint: lowBatteryTint, threshold: lowBatteryThreshold,
+                                           early: earlyBatteryWarning, earlyThreshold: earlyBatteryThreshold) {
+        case .low: return .red
+        case .early: return .orange
+        case .none: return .white.opacity(0.9)
+        }
+    }
+
+    /// The icon empties with the charge, as the menu bar's does.
+    private var batterySymbol: String {
+        BatteryPowerSupport.menuBarSymbol(percent: service.power.chargePercent ?? 100,
+                                          isCharging: service.power.isCharging,
+                                          externalConnected: service.power.externalConnected)
+    }
 
     /// Centre battery content inside the wing's visible area, past its curved shoulder.
     private var restingBatteryInset: CGFloat {
@@ -731,7 +821,8 @@ struct NotchRestingStrip: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 5))
                             }
                         case .battery:
-                            Image(systemName: "battery.100percent").font(.system(size: 12))
+                            Image(systemName: batterySymbol).font(.system(size: 12))
+                                .foregroundStyle(batteryTint)
                                 .padding(.leading, restingBatteryInset)
                         case .agents:
                             NotchAgentRestingWing(leading: true)
@@ -754,6 +845,7 @@ struct NotchRestingStrip: View {
                         case .battery:
                             if let percent = service.power.chargePercent {
                                 Text("\(percent)%").font(.system(size: 9, weight: .medium)).monospacedDigit()
+                                    .foregroundStyle(batteryTint)
                                     .lineLimit(1)
                                     .padding(.trailing, restingBatteryInset)
                             }
