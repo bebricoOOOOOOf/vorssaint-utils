@@ -465,7 +465,7 @@ final class AutoQuitService: ObservableObject {
         AXUIElementSetMessagingTimeout(appElement, 0.35)
         let candidates = accessibilityWindowCandidates(of: appElement)
         let windows = standardWindows(from: candidates)
-        let transientWindows = quitBlockingTransientWindows(from: candidates)
+        let transientWindows = quitBlockingTransientWindows(from: candidates, excluding: windows)
         var watchedWindows = 0
         for window in windows {
             if watch(window: window, observer: observer, refcon: refcon) { watchedWindows += 1 }
@@ -653,12 +653,16 @@ final class AutoQuitService: ObservableObject {
 
     /// Main/focused non-standard windows that represent an active modal
     /// interaction. They block auto-quit without becoming ordinary app windows.
-    private func quitBlockingTransientWindows(from candidates: [AXUIElement]) -> [AXUIElement] {
+    /// `standard` is what `standardWindows(from:)` already found among the
+    /// same candidates; those are skipped rather than asked again, since each
+    /// standard-window test is several synchronous round trips into the app.
+    private func quitBlockingTransientWindows(from candidates: [AXUIElement],
+                                              excluding standard: [AXUIElement]) -> [AXUIElement] {
         var result: [AXUIElement] = []
-        for window in candidates where !result.contains(where: { CFEqual($0, window) }) {
+        for window in candidates where !result.contains(where: { CFEqual($0, window) })
+            && !standard.contains(where: { CFEqual($0, window) }) {
             AXUIElementSetMessagingTimeout(window, 0.35)
-            guard !Self.isStandardWindow(window),
-                  Self.isQuitBlockingTransientWindow(window) else { continue }
+            guard Self.isQuitBlockingTransientWindow(window) else { continue }
             result.append(window)
         }
         return result
@@ -707,7 +711,7 @@ final class AutoQuitService: ObservableObject {
         if axWindows.contains(where: { Self.boolAttribute($0, kAXMinimizedAttribute as String) }) {
             return true
         }
-        if !quitBlockingTransientWindows(from: candidates).isEmpty {
+        if !quitBlockingTransientWindows(from: candidates, excluding: axWindows).isEmpty {
             return true
         }
         if hasExternalQuitBlockingTransientWindow(hostPID: pid) {
