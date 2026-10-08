@@ -203,6 +203,21 @@ enum NotchMusicHardeningTests {
         suite.expect(fallback(paused, explicit: true) == nil, "an explicit paused media selection is preserved")
         suite.expect(fallback(playback("live"), selected: output.selection) == output,
                      "explicit output selection identifies that app while another media app plays")
+        let ownPaused = NotchPlayback(track: RadialNowPlayingSnapshot(title: "own", artist: nil, album: nil, artworkData: nil,
+            appBundleIdentifier: "test.music-output", appPID: 78), isPlaying: false, elapsed: 0, duration: 180,
+            rate: 0, sampledAt: Date(), canSeek: false)
+        suite.expect(fallback(ownPaused) == output,
+                     "a paused song keeps its resume control while its own app still holds the output open")
+        let helperPaused = NotchPlayback(track: RadialNowPlayingSnapshot(title: "tab", artist: nil, album: nil, artworkData: nil,
+            appBundleIdentifier: "test.music-output.helper", appPID: 90), isPlaying: false, elapsed: 0, duration: 180,
+            rate: 0, sampledAt: Date(), canSeek: false)
+        let pausedHelper = NotchPlaybackSource(pid: 90, bundleIdentifier: "test.music-output.helper", isMusicApp: true,
+            isPlaying: false, hasTrack: true, applicationBundleIdentifier: "test.music-output")
+        suite.expect(NotchAudioSourceSupport.fallback(in: [musicOutput], metadata: helperPaused, explicitMetadataSelection: false,
+                                                      selectedAudio: nil, previousPID: 90, metadataSources: [pausedHelper]) == nil
+                     && NotchAudioSourceSupport.fallback(in: [musicOutput], metadata: helperPaused, explicitMetadataSelection: false,
+                                                         selectedAudio: nil, previousPID: 90) == musicOutput,
+                     "a paused browser tab is not replaced by its own browser's lingering output")
         var helper = NotchPlaybackSource(pid: 99, bundleIdentifier: "test.helper", isMusicApp: false,
             isPlaying: true, hasTrack: true, applicationBundleIdentifier: output.bundleIdentifier)
         helper.displayName = "Output App"

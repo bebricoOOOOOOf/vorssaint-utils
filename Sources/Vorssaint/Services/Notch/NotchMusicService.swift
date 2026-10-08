@@ -277,7 +277,7 @@ final class NotchMusicService: ObservableObject {
     private func applyPresentation(_ reading: Reading) {
         let fallback = NotchAudioSourceSupport.fallback(in: audioSources, metadata: reading.playback,
             explicitMetadataSelection: chosenSource != nil || reading.automatic == false,
-            selectedAudio: selectedAudioSource, previousPID: playback?.track.appPID)
+            selectedAudio: selectedAudioSource, previousPID: playback?.track.appPID, metadataSources: reading.sources)
         let reading = Reading(playback: fallback.map { NotchAudioSourceSupport.playback(for: $0) } ?? reading.playback,
             artwork: fallback == nil ? reading.artwork : fallback.flatMap { NSRunningApplication(processIdentifier: $0.pid)?.icon }, tint: fallback == nil ? reading.tint : nil,
             sources: NotchAudioSourceSupport.merged(metadata: reading.sources, audio: audioSources),

@@ -236,14 +236,25 @@ enum NotchAudioSourceSupport {
 
     static func fallback(in sources: [NotchPlaybackSource], metadata: NotchPlayback?,
                          explicitMetadataSelection: Bool, selectedAudio: NotchPlaybackSource.Selection?,
-                         previousPID: Int32?) -> NotchPlaybackSource? {
+                         previousPID: Int32?, metadataSources: [NotchPlaybackSource] = []) -> NotchPlaybackSource? {
         if let selectedAudio {
             guard let selected = sources.first(where: { $0.selection == selectedAudio }) else { return nil }
             if metadata?.track.appBundleIdentifier == selected.bundleIdentifier { return nil }
             return selected
         }
         guard !explicitMetadataSelection, metadata?.isPlaying != true else { return nil }
-        return sources.first { $0.pid == previousPID } ?? sources.sorted { $0.pid < $1.pid }.first
+        // A paused song keeps its resume control while its own app, or the
+        // browser its helper belongs to, still holds the output open.
+        let candidates = sources.filter { !owns(metadata, $0, metadataSources: metadataSources) }
+        return candidates.first { $0.pid == previousPID } ?? candidates.sorted { $0.pid < $1.pid }.first
+    }
+
+    /// The output comes from the app whose media session the metadata reports.
+    static func owns(_ metadata: NotchPlayback?, _ source: NotchPlaybackSource,
+                     metadataSources: [NotchPlaybackSource]) -> Bool {
+        guard let track = metadata?.track else { return false }
+        if source.pid == track.appPID || source.bundleIdentifier == track.appBundleIdentifier { return true }
+        return metadataSources.contains { $0.pid == track.appPID && $0.applicationBundleIdentifier == source.bundleIdentifier }
     }
 
     static func playback(for source: NotchPlaybackSource, now: Date = Date()) -> NotchPlayback {
