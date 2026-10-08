@@ -728,6 +728,17 @@ final class BrightnessService: ObservableObject {
     /// Second half of `toggleDisplay`, on the main thread: the display
     /// reconfiguration and the bookkeeping that follows it.
     private func commitDisplayToggle(_ display: BrightnessDisplay, enabled: Bool) {
+        if !enabled {
+            // Another monitor can disconnect after the worker's check but
+            // before this main-thread transaction. Never turn off the last
+            // drawable display using that earlier snapshot.
+            let topology = Self.currentTopology()
+            let drawable = Self.drawableDisplayIDs(online: topology.online, active: topology.active)
+            guard BrightnessSupport.canDisableDisplay(drawableDisplayIDs: drawable, target: display.id) else {
+                finishDisplayToggle(id: display.id, enabled: enabled, failure: .lastActive)
+                return
+            }
+        }
         if enabled, discardReplacedDisplay(display.id) {
             finishDisplayToggle(id: display.id, enabled: enabled, failure: .failed)
             refresh(force: true)

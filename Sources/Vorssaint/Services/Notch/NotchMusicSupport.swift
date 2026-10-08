@@ -47,6 +47,12 @@ struct NotchPlayback: Equatable {
     /// Output activity identifies an app, but does not supply a track or controls.
     var isAudioOnly = false
 
+    /// The same recording from the same player. Readings without a name
+    /// share no recording, so only their player tells them apart.
+    static func sameRecording(_ first: NotchPlayback?, _ second: NotchPlayback?) -> Bool {
+        first?.commandContext == second?.commandContext && first?.track.appPID == second?.track.appPID
+    }
+
     func position(at date: Date) -> TimeInterval {
         min(duration, max(0, elapsed + (isPlaying ? max(0, date.timeIntervalSince(sampledAt)) * rate : 0)))
     }
