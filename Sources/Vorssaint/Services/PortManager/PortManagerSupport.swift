@@ -63,7 +63,10 @@ enum PortManagerSupport {
             case "P": proto = value
             case "n":
                 address = value
-                guard let last = value.split(separator: ":").last, let parsed = Int(last) else {
+                // A connected socket names its peer after "->"; its last port is
+                // the remote one, and the socket is not waiting for anyone.
+                // UDP has no LISTEN state to filter these out, so skip them here.
+                guard !value.contains("->"), let last = value.split(separator: ":").last, let parsed = Int(last) else {
                     port = 0
                     continue
                 }

@@ -28,6 +28,8 @@ enum UtilitiesFeatureTests {
         PUDP
         n*:5353
         n[::]:5353
+        n192.168.1.5:61234->1.1.1.1:443
+        n[fe80::1%en0]:50000->[2606:4700::1111]:443
         p789
         cOther Server
         PTCP
@@ -41,6 +43,8 @@ enum UtilitiesFeatureTests {
         suite.expect(parsedPorts.filter { $0.protocolName == "TCP" }.count == 4
                      && parsedPorts.filter { $0.protocolName == "UDP" }.count == 2,
                "port parser preserves each socket's protocol")
+        suite.expect(!parsedPorts.contains { $0.port == 443 || $0.port == 61234 || $0.port == 50000 },
+               "connected UDP sockets are not listed, and never under their peer's port")
         suite.expect(PortManagerSupport.lsofArguments.contains("-iUDP")
                      && PortManagerSupport.lsofArguments.contains("-sTCP:LISTEN"),
                "port snapshot includes UDP without broadening TCP beyond listeners")
