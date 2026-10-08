@@ -1387,20 +1387,17 @@ final class ClipboardHistoryService: ObservableObject {
                 return nil
             }
             // The cards run left to right. A plain arrow walks them; with a
-            // modifier it stays with the search field's caret.
-            if event.keyCode == UInt16(kVK_DownArrow) || (modifiers == [.control] && key == "n")
+            // modifier it stays with the search field's caret. Control-N and
+            // Control-P walk them too.
+            let controlStep = ClipboardHistoryFocus.navigationDelta(key: key, controlOnly: modifiers == [.control])
+            if event.keyCode == UInt16(kVK_DownArrow) || controlStep == 1
                 || (modifiers.isEmpty && event.keyCode == UInt16(kVK_RightArrow)) {
                 self.moveQuickSelection(1)
                 return nil
             }
-            if event.keyCode == UInt16(kVK_UpArrow) || (modifiers == [.control] && key == "p")
+            if event.keyCode == UInt16(kVK_UpArrow) || controlStep == -1
                 || (modifiers.isEmpty && event.keyCode == UInt16(kVK_LeftArrow)) {
                 self.moveQuickSelection(-1)
-                return nil
-            }
-            if let delta = ClipboardHistoryFocus.navigationDelta(
-                key: key, controlOnly: modifiers == [.control]) {
-                self.moveQuickSelection(delta)
                 return nil
             }
             if modifiers == [.command],
