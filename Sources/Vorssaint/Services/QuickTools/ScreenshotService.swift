@@ -494,6 +494,14 @@ final class ScreenshotService: ObservableObject {
         }
     }
 
+    /// The editor decides what is kept, and its Add to Shelf puts the
+    /// finished picture there, so the raw capture leaves the Shelf as it
+    /// does when captures open straight in the editor.
+    private func editFromPreview(_ capture: ScreenshotSelectionController.Capture, latestCapture: UUID?) {
+        unshelve(latestCapture)
+        openEditor(with: capture)
+    }
+
     private func cancelAutoShelf() {
         for task in autoShelfTasks.values { task.cancel() }
         autoShelfTasks.removeAll()
@@ -549,7 +557,7 @@ final class ScreenshotService: ObservableObject {
                 guard let self else { return [] }
                 switch action {
                 case .edit:
-                    self.openEditor(with: capture)
+                    self.editFromPreview(capture, latestCapture: latestCapture)
                     return [.edit]
                 case .pin:
                     ScreenshotPinController.shared.pin(image: capture.image, scale: capture.scale)
@@ -705,6 +713,9 @@ final class ScreenshotService: ObservableObject {
         }
         preview?.close()
         preview = nil
+        // Editing the latest capture takes its raw copy off the Shelf, as
+        // Edit in its preview does.
+        unshelve(latestCaptureToken)
         openEditor(with: capture)
     }
 

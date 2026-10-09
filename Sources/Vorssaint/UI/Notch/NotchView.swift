@@ -755,6 +755,29 @@ private extension UpdateService.State {
     }
 }
 
+/// The charge the closed island rests with, beside a camera or in the capsule.
+enum NotchRestingBattery {
+    /// Both halves of the charge turn amber, then red, together as it runs low.
+    static func tint(for power: PowerReading, tint: Bool, threshold: Int,
+                     early: Bool, earlyThreshold: Int) -> Color {
+        switch NotchSupport.batteryWarning(percent: power.chargePercent,
+                                           externalConnected: power.externalConnected,
+                                           tint: tint, threshold: threshold,
+                                           early: early, earlyThreshold: earlyThreshold) {
+        case .low: return .red
+        case .early: return .orange
+        case .none: return .white.opacity(0.9)
+        }
+    }
+
+    /// The icon empties with the charge, as the menu bar's does.
+    static func symbol(for power: PowerReading) -> String {
+        BatteryPowerSupport.menuBarSymbol(percent: power.chargePercent ?? 100,
+                                          isCharging: power.isCharging,
+                                          externalConnected: power.externalConnected)
+    }
+}
+
 /// The closed island at rest beside a camera: the wings with the charge,
 /// the song or the AI allowance the person chose, when the menus leave room.
 /// The companion rests in a wing when nothing else is there, and walks
@@ -772,24 +795,12 @@ struct NotchRestingStrip: View {
 
     private var geometry: NotchGeometry { displayGeometry ?? service.geometry }
 
-    /// Both halves of the charge turn amber, then red, together as it runs low.
     private var batteryTint: Color {
-        switch NotchSupport.batteryWarning(percent: service.power.chargePercent,
-                                           externalConnected: service.power.externalConnected,
-                                           tint: lowBatteryTint, threshold: lowBatteryThreshold,
-                                           early: earlyBatteryWarning, earlyThreshold: earlyBatteryThreshold) {
-        case .low: return .red
-        case .early: return .orange
-        case .none: return .white.opacity(0.9)
-        }
+        NotchRestingBattery.tint(for: service.power, tint: lowBatteryTint, threshold: lowBatteryThreshold,
+                                 early: earlyBatteryWarning, earlyThreshold: earlyBatteryThreshold)
     }
 
-    /// The icon empties with the charge, as the menu bar's does.
-    private var batterySymbol: String {
-        BatteryPowerSupport.menuBarSymbol(percent: service.power.chargePercent ?? 100,
-                                          isCharging: service.power.isCharging,
-                                          externalConnected: service.power.externalConnected)
-    }
+    private var batterySymbol: String { NotchRestingBattery.symbol(for: service.power) }
 
     /// Centre battery content inside the wing's visible area, past its curved shoulder.
     private var restingBatteryInset: CGFloat {

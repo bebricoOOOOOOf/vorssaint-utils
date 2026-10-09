@@ -378,7 +378,7 @@ final class AppUninstaller: ObservableObject {
                 self.items = []
                 self.phase = .done(freed: freed, failed: failed)
                 if let targetURL {
-                    Self.releaseCommandBarShortcut(ofRemovedAppAt: targetURL, bundleID: targetBundleID)
+                    Self.removeCommandBarState(ofRemovedAppAt: targetURL, bundleID: targetBundleID)
                 }
             }
         }
@@ -446,31 +446,29 @@ final class AppUninstaller: ObservableObject {
             removeSelected()
         } else {
             phase = .done(freed: homebrewRemovalSize, failed: [])
-            Self.releaseCommandBarShortcut(ofRemovedAppAt: targetURL, bundleID: target?.bundleID)
+            Self.removeCommandBarState(ofRemovedAppAt: targetURL, bundleID: target?.bundleID)
         }
     }
 
-    /// A removed app's own Command Bar shortcut goes with it, so the keys can
-    /// be given to another app. Checked off the main thread, since finding
-    /// another copy the bar still lists reads every application folder and
-    /// asks Spotlight for the ones in the home folder.
-    private static func releaseCommandBarShortcut(ofRemovedAppAt url: URL, bundleID: String?) {
-        // Almost no removed app has a shortcut, so a removal without one never
-        // pays for the search below.
-        let path = url.standardizedFileURL.path
-        guard AppFeature.commandBar.isAvailable,
-              CommandBarService.shared.rowShortcuts[
-                  CommandBarRowShortcuts.appKey(bundleID: bundleID, path: path)] != nil else { return }
+    /// A remaining copy keeps the preferences shared under its bundle ID.
+    /// Only apps with shared preferences need the folder and Spotlight scan;
+    /// path-specific state can go without it, even while the bar is disabled.
+    private static func removeCommandBarState(ofRemovedAppAt url: URL, bundleID: String?) {
+        let bundleIDs: Set<String> = bundleID.map {
+            CommandBarService.shared.hasStoredApplicationState(bundleID: $0) ? [$0] : []
+        } ?? []
         DispatchQueue.global(qos: .utility).async {
             guard UninstallerSupport.isConfirmedAbsent(at: url) else { return }
-            let remaining = Set(InstalledApps.installedApplications(
+            let remaining: Set<String> = bundleIDs.isEmpty ? [] : Set(InstalledApps.installedApplications(
                 includeSystemApplications: true,
                 spotlightPaths: CommandBarService.spotlightApplicationPaths())
                 .compactMap(\.bundleID))
-            guard let key = CommandBarRowShortcuts.keyFreed(
-                byRemovingAppAt: path, bundleID: bundleID,
-                remainingBundleIDs: remaining) else { return }
-            DispatchQueue.main.async { CommandBarService.shared.forgetRowShortcut(forKey: key) }
+            DispatchQueue.main.async {
+                // A reinstall while the scan was pending must keep its state.
+                guard UninstallerSupport.isConfirmedAbsent(at: url) else { return }
+                CommandBarService.shared.removeApplicationState(
+                    bundleIDs: bundleIDs, urls: [url], remainingBundleIDs: remaining)
+            }
         }
     }
 

@@ -389,7 +389,7 @@ enum CommandBarCatalog {
                     : .needsSetup(featureTitle: clipboard.title, page: .clipboard),
                 run: { _ in afterBeat(0.1) { ClipboardHistoryService.shared.showHistoryWindow() } }))
             // Counted when the bar lists it: a copy made before confirming is kept.
-            let recentIDs = Set(ClipboardHistoryService.shared.recentEntries.map(\.id))
+            let recentIDs = ClipboardHistoryService.shared.recentEntriesSnapshot
             entries.append(CommandBarEntry(
                 id: "action.clipboardClearRecent",
                 title: clipboard.clearRecent,

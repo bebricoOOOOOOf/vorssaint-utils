@@ -1954,19 +1954,22 @@ enum SwitcherModelFeatureTests {
                "update showcase intro starts unseen")
         suite.expect(registeredDefaults[DefaultsKey.updateShowcaseMediaOverride] as? String == "",
                "update showcase media override is empty by default")
-        suite.expect(SupportUpdateIntroInfo.releaseVersion == "3.4.0",
-               "support prompt is deliberately pinned to the 3.4 stable series")
-        suite.expect(SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0", lastSeenVersion: "3.3.2")
-               && SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0", lastSeenVersion: nil),
+        suite.expect(SupportUpdateIntroInfo.releaseVersion == "3.4.1",
+               "support prompt is deliberately pinned to the 3.4.1 stable release")
+        suite.expect(SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1", lastSeenVersion: "3.3.2")
+               && SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1", lastSeenVersion: nil),
                "support prompt shows once after updating to its pinned release")
-        suite.expect(!SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0", lastSeenVersion: SupportUpdateIntroInfo.seenVersion),
-               "support prompt stays hidden after it is seen")
-        suite.expect(SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0", lastSeenVersion: "3.4.0"),
+        suite.expect(SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1", lastSeenVersion: "3.4.0-support"),
+               "people who saw the support prompt in 3.4.0 see it again in 3.4.1")
+        suite.expect(!SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1", lastSeenVersion: SupportUpdateIntroInfo.seenVersion)
+               && !SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.2", lastSeenVersion: SupportUpdateIntroInfo.seenVersion),
+               "support prompt stays hidden after it is seen, through later patches")
+        suite.expect(SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1", lastSeenVersion: "3.4.1"),
                "premature support markers from beta onboarding do not suppress the stable invitation")
-        suite.expect(!SupportUpdateIntroInfo.shouldShow(appVersion: "3.3.2", lastSeenVersion: nil)
-               && !SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0-beta.7", lastSeenVersion: nil)
+        suite.expect(!SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.0", lastSeenVersion: nil)
+               && !SupportUpdateIntroInfo.shouldShow(appVersion: "3.4.1-beta.5", lastSeenVersion: nil)
                && !SupportUpdateIntroInfo.shouldShow(appVersion: "3.5.0", lastSeenVersion: nil),
-               "support prompt never leaks into another release series")
+               "support prompt never leaks into another release or a beta")
         suite.expect(AppInfo.discordURL.absoluteString == "https://discord.gg/M6BwWH4BJp",
                "the community action uses the permanent Discord invitation")
         suite.expect(AppInfo.coffeeURL.absoluteString == "https://buymeacoffee.com/vorssaint",
@@ -1979,13 +1982,13 @@ enum SwitcherModelFeatureTests {
         // decision above is made consciously, never by omission.
         let releasePlist = NSDictionary(contentsOfFile: "Resources/Info.plist")
         let plistVersion = (releasePlist?["CFBundleShortVersionString"] as? String) ?? ""
-        suite.expect(plistVersion == "3.4.1-beta.3",
+        suite.expect(plistVersion == "3.4.1",
                "bumping the app version requires re-deciding the support prompt pin above")
         let plistBuild = (releasePlist?["CFBundleVersion"] as? String) ?? ""
-        suite.expect(plistBuild == "98",
+        suite.expect(plistBuild == "101",
                "every app version needs its own incremented bundle build")
-        suite.expect(SupportUpdateIntroInfo.releaseVersion == "3.4.0",
-               "the support prompt is prepared for the 3.4 final release")
+        suite.expect(SupportUpdateIntroInfo.releaseVersion == "3.4.1",
+               "the support prompt is prepared for the 3.4.1 stable release")
         suite.expect(UpdateHighlightsInfo.releaseVersion == "3.4.0",
                "the stable release has its own tour marker without changing the installed version")
         for version in ["3.4.0-beta.1", "3.4.0-beta.2", "3.4.0-beta.2.1", "3.4.0-beta.3", "3.4.0-beta.4", "3.4.0-beta.5", "3.4.0-beta.6", "3.4.0-beta.7", "3.4.0-beta.10"] {
@@ -2013,8 +2016,8 @@ enum SwitcherModelFeatureTests {
         for version in ["3.4.0", "3.4.1", "3.4.2", "3.4.10", "3.4.99"] {
             suite.expect(UpdateHighlightsInfo.shouldShow(appVersion: version, lastSeenVersion: nil)
                    && UpdateHighlightsInfo.shouldShow(appVersion: version, lastSeenVersion: UpdateHighlightsInfo.betaSeenVersion)
-                   && SupportUpdateIntroInfo.shouldShow(appVersion: version, lastSeenVersion: "3.4.0"),
-                   "direct hotfix upgraders still receive the stable tour and support invitation")
+                   && (version == "3.4.0" || SupportUpdateIntroInfo.shouldShow(appVersion: version, lastSeenVersion: "3.4.0")),
+                   "direct hotfix upgraders still receive the stable tour and, from 3.4.1, the support invitation")
             suite.expect(UpdateHighlightsInfo.seenVersion(for: version) == UpdateHighlightsInfo.releaseVersion
                    && !UpdateHighlightsInfo.shouldShow(appVersion: version, lastSeenVersion: UpdateHighlightsInfo.releaseVersion)
                    && !SupportUpdateIntroInfo.shouldShow(appVersion: version, lastSeenVersion: SupportUpdateIntroInfo.seenVersion),
@@ -4534,6 +4537,16 @@ enum SwitcherModelFeatureTests {
         suite.expect(QuickToolsSupport.openableURL(from: "example.com") == nil,
                "a bare host with no scheme is not opened")
 
+        for fallback in ["", " \n", "https://example.com/a.png", "data:image/png;base64,AAAA",
+                         "blob:https://example.com/1", "IMG_1234.HEIC", "photo.jpeg", "clip.mp4", "scan.pdf"] {
+            suite.expect(QuickToolsSupport.isMediaTextFallback(fallback),
+                         "'\(fallback)' is the text a lone picture or clip carries")
+        }
+        for text in ["Total", "Total:", "1.2.3", "3.14", "e.g.", "Item\tQty\nA\t1", "see https://example.com",
+                     "two words", "U.S.", "example.com", "2.4GHz", "12.5kg", "config.yaml", "john@example.com"] {
+            suite.expect(!QuickToolsSupport.isMediaTextFallback(text),
+                         "'\(text)' is copied text that still pastes plain")
+        }
         // Paste plain delegates only to the universal ⌥⇧⌘V equivalent
         // (shift = 1, option = 2 in the AX modifier mask); anything else in
         // an app's menus is some other edit command and must not be pressed.
