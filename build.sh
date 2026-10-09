@@ -267,6 +267,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/NotchMusicExtrasStrings.swift
         Sources/Vorssaint/Services/Notch/NotchLyricsSupport.swift
         Sources/Vorssaint/Services/Notch/NotchQueueSupport.swift
+        Sources/Vorssaint/Services/Notch/NotchPreferredPlayer.swift
         Sources/Vorssaint/Core/NotchFilesStrings.swift
         Sources/Vorssaint/Core/NotchWatchStrings.swift
         Sources/Vorssaint/Services/Notch/NotchWatchSupport.swift

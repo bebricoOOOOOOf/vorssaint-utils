@@ -122,21 +122,36 @@ struct NotchMusicView: View {
     }
 
     private func idle(height: CGFloat) -> some View {
-        HStack(spacing: 20) {
-            Image(systemName: "music.note")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.white.opacity(0.75))
-                .frame(width: 76, height: 76)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        let player = preview ? nil : NotchPreferredPlayer.current()
+        let opens = player != nil
+        let openTitle = player.map { NotchPreferredPlayer.openTitle(for: $0) } ?? ""
+        return HStack(spacing: 20) {
+            // With a music app to open, the cover and the buttons below open it.
+            Button { NotchPreferredPlayer.open() } label: {
+                Image(systemName: "music.note")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .frame(width: 76, height: 76)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            }
+            .buttonStyle(NotchButtonStyle(cornerRadius: 24))
+            .disabled(!opens)
+            .help(openTitle)
+            .accessibilityLabel(opens ? openTitle : text.mediaNothingPlaying)
             VStack(alignment: .leading, spacing: 6) {
                 if !service.sources.isEmpty || !service.sourceIsAutomatic {
                     sourcePicker(nil)
                 } else {
                     Text(text.mediaNothingPlaying).font(.system(size: 17, weight: .semibold))
                 }
-                Text(FeatureStrings.notch(l10n.language).musicHint)
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if opens {
+                    NotchMusicIdleTransport(compact: true, openTitle: openTitle)
+                } else {
+                    Text(FeatureStrings.notch(l10n.language).musicHint)
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: height)
@@ -307,6 +322,40 @@ private struct NotchMusicSideButton: View {
         .accessibilityLabel(title)
         .accessibilityHint(hint ?? "")
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+/// The transport as it looks with nothing playing. Every button opens the
+/// music app, since there is no player to send a command to yet.
+struct NotchMusicIdleTransport: View {
+    var compact = false
+    let openTitle: String
+    @ObservedObject private var l10n = L10n.shared
+    private var text: RadialMenuFeatureStrings { FeatureStrings.radialMenu(l10n.language) }
+    private var height: CGFloat { compact ? 36 : 44 }
+
+    var body: some View {
+        HStack(spacing: compact ? 12 : 18) {
+            button("backward.fill", title: text.mediaPrevious, size: compact ? 16 : 19)
+            button("play.fill", title: text.mediaPlayPause, size: compact ? 22 : 26)
+            button("forward.fill", title: text.mediaNext, size: compact ? 16 : 19)
+        }
+        .frame(height: height)
+    }
+
+    private func button(_ symbol: String, title: String, size: CGFloat) -> some View {
+        Button { NotchPreferredPlayer.open() } label: {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: height, height: height)
+                .contentShape(Circle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: height / 2))
+        .accessibilityLabel(title)
+        // VoiceOver says what the press does: it opens the app, not a skip.
+        .accessibilityHint(openTitle)
+        .help(openTitle)
     }
 }
 
@@ -533,15 +582,25 @@ struct NotchMusicControlsView: View {
     @ObservedObject private var l10n = L10n.shared
     @Environment(\.notchSettingsPreview) private var preview
     private var text: RadialMenuFeatureStrings { FeatureStrings.radialMenu(l10n.language) }
+    private var isIdle: Bool {
+        !preview && music.playback == nil && !music.awaitingPlayback
+    }
 
     var body: some View {
+        let player = isIdle ? NotchPreferredPlayer.current() : nil
+        let idleOpens = player != nil
+        let openTitle = player.map { NotchPreferredPlayer.openTitle(for: $0) } ?? ""
         HStack(spacing: 12) {
-            Button { notch.select(.music) } label: {
+            // With nothing playing, the cover opens the music app instead.
+            Button {
+                if isIdle, NotchPreferredPlayer.open() { return }
+                notch.select(.music)
+            } label: {
                 NotchArtwork(image: music.artwork, size: max(40, height - 24))
             }
             .buttonStyle(NotchButtonStyle(cornerRadius: 16))
-            .accessibilityLabel(text.mediaNowPlaying)
-            .help(text.mediaNowPlaying)
+            .accessibilityLabel(idleOpens ? openTitle : text.mediaNowPlaying)
+            .help(idleOpens ? openTitle : text.mediaNowPlaying)
             VStack(alignment: .leading, spacing: 4) {
                 Button { notch.select(.music) } label: {
                     VStack(alignment: .leading, spacing: 2) {
@@ -563,6 +622,8 @@ struct NotchMusicControlsView: View {
                 .buttonStyle(.plain)
                 if let playback = music.playback {
                     NotchMusicTransport(playback: playback, compact: true).frame(maxWidth: .infinity)
+                } else if idleOpens {
+                    NotchMusicIdleTransport(compact: true, openTitle: openTitle).frame(maxWidth: .infinity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

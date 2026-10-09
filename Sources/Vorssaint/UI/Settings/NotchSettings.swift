@@ -23,7 +23,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
     @AppStorage(DefaultsKey.notchCalendarTimeLeft) private var calendarTimeLeft = false
     @AppStorage(DefaultsKey.notchCalendarWeekNumbers) private var calendarWeekNumbers = false
-    @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
+    @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = false
     @AppStorage(DefaultsKey.notchWatchEnabled) private var watchEnabled = true
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchLyricsOnline) private var lyricsOnline = false
@@ -60,6 +60,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchTrackChange) private var trackChange = true
     @AppStorage(DefaultsKey.notchShowPlayingMusic) private var showPlayingMusic = true
     @AppStorage(DefaultsKey.notchIncludeOtherPlayers) private var includeOtherPlayers = true
+    @AppStorage(DefaultsKey.notchPreferredPlayer) private var preferredPlayer = NotchPreferredPlayer.automatic
     @AppStorage(DefaultsKey.notchIdleContent) private var idle = NotchIdleContent.music.rawValue
     @AppStorage(DefaultsKey.notchLowBatteryTint) private var lowBatteryTint = false
     @AppStorage(DefaultsKey.notchLowBatteryThreshold) private var lowBatteryThreshold = NotchSupport.defaultLowBatteryThreshold
@@ -100,6 +101,7 @@ struct NotchSettings: View {
     @State private var selectedModule = NotchModule.controls
     @State private var draggingModule: NotchModule?
     @State private var draggingControl: NotchControlItem?
+    @State private var preferredPlayers: [NotchPreferredPlayer.Choice]?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
@@ -410,6 +412,19 @@ struct NotchSettings: View {
             let music = FeatureStrings.notchMusicExtras(l10n.language)
             switchRow("music.note", text.playingMusic, isOn: $showPlayingMusic)
             switchRow("play.rectangle", music.includeOtherPlayers, isOn: $includeOtherPlayers)
+            SettingsRow(symbol: "arrow.up.forward.app", title: music.preferredPlayer, caption: music.preferredPlayerHint) {
+                Picker(music.preferredPlayer, selection: $preferredPlayer) {
+                    Text(music.automaticSource).tag(NotchPreferredPlayer.automatic)
+                    ForEach(NotchPreferredPlayer.choices(in: preferredPlayers ?? [], including: preferredPlayer), id: \.bundleID) { app in
+                        Text(app.name).tag(app.bundleID)
+                    }
+                }
+                .labelsHidden()
+            }
+            .task {
+                guard let choices = await NotchPreferredPlayer.loadInstalled(), !Task.isCancelled else { return }
+                preferredPlayers = choices
+            }
             SettingsFeatureSwitchRow(symbol: "text.quote", title: music.enableLyrics, isOn: $lyricsEnabled, feature: .notchLyrics)
             if lyricsEnabled, AppFeature.notchLyrics.isAvailable {
                 switchRow("globe", music.online, caption: music.onlineHint, isOn: $lyricsOnline)

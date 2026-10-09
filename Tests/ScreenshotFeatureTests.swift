@@ -204,6 +204,7 @@ enum ScreenshotFeatureTests {
             hideVorssaintWindows: false,
             protectedWindowIDs: protectedScreenshotWindows
         ), "screenshot cannot pick its own protected capture UI")
+        islandCaptureChecks(suite)
 
         // Another process can draw a border around a window as a window of its
         // own; clicking there has to capture the window it surrounds.
@@ -1543,6 +1544,31 @@ enum ScreenshotFeatureTests {
                                                      editorWindowNumber: 42,
                                                      editorIsKey: true),
                "screenshot editor ignores events explicitly owned by another window")
+        suite.expect(ScreenshotSupport.editorIgnoresPostedCopy(sourceProcessID: 4242, ownProcessID: 77,
+                                                         now: 100.3, lastPointerActivity: 100),
+               "a Command-C another app posts as a canvas drag ends does not copy and close the editor")
+        suite.expect(!ScreenshotSupport.editorIgnoresPostedCopy(sourceProcessID: 0, ownProcessID: 77,
+                                                          now: 100.1, lastPointerActivity: 100),
+               "a pressed Command-C right after drawing still copies the capture")
+        suite.expect(!ScreenshotSupport.editorIgnoresPostedCopy(sourceProcessID: 4242, ownProcessID: 77,
+                                                          now: 101, lastPointerActivity: 100),
+               "a posted Command-C well after the last stroke still copies, as automation sends it")
+        suite.expect(!ScreenshotSupport.editorIgnoresPostedCopy(sourceProcessID: 4242, ownProcessID: 77,
+                                                          now: 100, lastPointerActivity: -.infinity),
+               "a posted Command-C before any canvas gesture still copies")
+        let editorControllerSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/QuickTools/ScreenshotEditorController.swift",
+            encoding: .utf8)) ?? ""
+        suite.expect(editorControllerSource.contains("ScreenshotSupport.editorIgnoresPostedCopy(")
+                && editorControllerSource.contains("self.model.notePointerActivity()")
+                && editorControllerSource.contains("NSEvent.removeMonitor(pointerMonitor)"),
+               "the editor's Command-C checks for a posted copy, fed by every press and drag in its window")
+        suite.expect(ScreenshotSupport.editorIgnoresRepeatedOutputKey(keyCode: kVK_Return, command: false, isRepeat: true)
+                && ScreenshotSupport.editorIgnoresRepeatedOutputKey(keyCode: kVK_ANSI_C, command: true, isRepeat: true),
+               "a held Return or Command-C does not copy and close the editor it repeats into")
+        suite.expect(!ScreenshotSupport.editorIgnoresRepeatedOutputKey(keyCode: kVK_Return, command: false, isRepeat: false)
+                && !ScreenshotSupport.editorIgnoresRepeatedOutputKey(keyCode: kVK_ANSI_Z, command: true, isRepeat: true),
+               "a single Return copies, and held undo keeps repeating")
         let previewFrame = ScreenshotSupport.quickPreviewFrame(
             size: CGSize(width: 286, height: 210),
             anchor: CGRect(x: 1100, y: 100, width: 300, height: 300),
@@ -3324,6 +3350,8 @@ enum ScreenshotFeatureTests {
                "screenshot annotation shadows ship off")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotShowLastRegion] as? Bool == true,
                "the previous capture outline stays visible by default, as it always was")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotHighlightWindows] as? Bool == true,
+               "window highlights preserve the existing selection appearance by default")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotLoupeStartsOn] as? Bool == false,
                "the always-on loupe is an opt-in and ships off")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotLoupeRememberZoom] as? Bool == false
@@ -3864,6 +3892,48 @@ enum ScreenshotFeatureTests {
                 == [.screenshot, .colorPicker],
                "capture roles are reordered for display and other roles fall away")
         GlobalShortcut.refreshLayoutLabels()
+    }
+
+    /// The island follows "Show in screenshots and videos" in Vorssaint's own
+    /// captures too, area selections included, except while it is the tool
+    /// taking the picture.
+    private static func islandCaptureChecks(_ suite: TestSuite) {
+        let island: CGWindowID = 20, copy: CGWindowID = 21, editor: CGWindowID = 11, overlay: CGWindowID = 12
+        let islandWindows: Set<CGWindowID> = [island, copy]
+        let ownWindows: Set<CGWindowID> = [editor, overlay, island, copy]
+        func shown(preference: Bool, tool: Bool) -> Set<CGWindowID> {
+            ScreenshotCapturePolicy.islandCaptureWindowIDs(
+                islandWindowIDs: islandWindows, mainWindowID: island,
+                showsInCaptures: preference, showsCaptureTool: tool)
+        }
+        suite.expect(shown(preference: true, tool: false) == islandWindows,
+                     "the island at rest, or open on a page, is in the picture when it shows in captures")
+        suite.expect(shown(preference: true, tool: true) == [copy],
+                     "the capture controls or a capture just taken stay out; copies on other displays stay in")
+        suite.expect(shown(preference: false, tool: false).isEmpty && shown(preference: false, tool: true).isEmpty,
+                     "the island stays out of every capture when it does not show in captures")
+
+        for tool in [false, true] {
+            let visible = shown(preference: true, tool: tool)
+            // What NotchService protects: the island windows not shown.
+            let protected = islandWindows.subtracting(visible).union([overlay])
+            let hidden = ScreenshotCapturePolicy.excludedWindowIDs(
+                hideVorssaintWindows: true, ownWindowIDs: ownWindows,
+                protectedWindowIDs: protected, islandWindowIDs: visible)
+            suite.expect(hidden == ownWindows.subtracting(visible),
+                         "hiding Vorssaint windows leaves the shown island in (capture tool: \(tool))")
+            let kept = ScreenshotCapturePolicy.excludedWindowIDs(
+                hideVorssaintWindows: false, ownWindowIDs: ownWindows,
+                protectedWindowIDs: protected, islandWindowIDs: visible)
+            suite.expect(kept == protected,
+                         "showing Vorssaint windows still keeps the capture interface out (capture tool: \(tool))")
+        }
+        // Watch reads an area and must never see the island, whatever the preference says.
+        suite.expect(ScreenshotCapturePolicy.excludedWindowIDs(
+            hideVorssaintWindows: true, ownWindowIDs: ownWindows,
+            protectedWindowIDs: islandWindows.union([overlay]),
+            islandWindowIDs: shown(preference: true, tool: false)) == ownWindows,
+                     "a caller that protects the island keeps it out even when it shows in captures")
     }
 }
 

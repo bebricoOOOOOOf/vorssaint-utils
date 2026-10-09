@@ -1093,6 +1093,8 @@ struct Strings {
     let supportIntroMessage: String
     let supportIntroStarButton: String
     let supportIntroStarMessage: String
+    /// A quiet line under the donation button inviting a GitHub star instead.
+    let supportIntroStarHint: String
     let supportIntroCoffeeButton: String
     let supportIntroLaterButton: String
     let supportIntroDoneButton: String
@@ -2193,6 +2195,7 @@ extension Strings {
         supportIntroMessage: "Se você quiser apoiar financeiramente o desenvolvimento, o Buy Me a Coffee é o único lugar para fazer isso.",
         supportIntroStarButton: "Dar uma estrela no GitHub",
         supportIntroStarMessage: "Apoio financeiro nunca é esperado. Dar uma estrela no GitHub ajuda mais pessoas a encontrar o Vorssaint e faz uma diferença enorme no desenvolvimento.",
+        supportIntroStarHint: "Uma estrela no GitHub também ajuda mais pessoas a conhecer o Vorssaint e significa muito.",
         supportIntroCoffeeButton: "Apoiar no Buy Me a Coffee",
         supportIntroLaterButton: "Agora não",
         supportIntroDoneButton: "Concluir",
@@ -3288,6 +3291,7 @@ extension Strings {
         supportIntroMessage: "If you would like to support development financially, Buy Me a Coffee is the one place to do it.",
         supportIntroStarButton: "Star Vorssaint on GitHub",
         supportIntroStarMessage: "Financial support is never expected. A star on GitHub helps more people discover Vorssaint and makes a real difference to its development.",
+        supportIntroStarHint: "A star on GitHub also helps more people find Vorssaint, and it means a lot.",
         supportIntroCoffeeButton: "Support on Buy Me a Coffee",
         supportIntroLaterButton: "Not now",
         supportIntroDoneButton: "Done",

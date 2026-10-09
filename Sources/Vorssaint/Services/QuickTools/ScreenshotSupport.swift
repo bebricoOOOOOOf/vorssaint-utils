@@ -1034,6 +1034,28 @@ enum ScreenshotSupport {
                       height: min(maximum.height, max(minimum.height, preferred.height)))
     }
 
+    /// Select-to-copy utilities answer a mouse drag with a posted ⌘C, which in
+    /// the editor would copy the capture and close it under a stroke that has
+    /// not landed yet. A ⌘C another process posts while the pointer presses or
+    /// drags in the editor, or just after, is theirs; a pressed ⌘C always copies.
+    static let editorPostedCopyGrace: TimeInterval = 0.6
+
+    static func editorIgnoresPostedCopy(sourceProcessID: Int64,
+                                        ownProcessID: Int64,
+                                        now: TimeInterval,
+                                        lastPointerActivity: TimeInterval) -> Bool {
+        sourceProcessID != 0 && sourceProcessID != ownProcessID
+            && now - lastPointerActivity < editorPostedCopyGrace
+    }
+
+    /// A held Return or ⌘C repeats into what the first press left on screen:
+    /// Return that applied a crop, or chose Edit in the preview, would copy
+    /// the capture and close the editor a moment later.
+    static func editorIgnoresRepeatedOutputKey(keyCode: Int, command: Bool, isRepeat: Bool) -> Bool {
+        isRepeat && (keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter
+            || (command && keyCode == kVK_ANSI_C))
+    }
+
     /// Local key monitors normally receive the editor's window number, but
     /// AppKit can clear it while resolving a main-menu key equivalent such as
     /// Command-Z. In that case the key window still owns the event. Never use
