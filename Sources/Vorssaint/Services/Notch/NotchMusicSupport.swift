@@ -228,6 +228,15 @@ struct NotchTrackChange {
 
 /// Resolves output-only apps without claiming track metadata or command support.
 enum NotchAudioSourceSupport {
+    /// The same identity the Now Playing adapter resolves: the process's own
+    /// bundle identifier, or its registered app bundle's when the process has
+    /// none (a player launched from Terminal). Keeping both sides alike lets
+    /// an output row group with that player's media session instead of
+    /// being dropped or listed twice.
+    static func bundleIdentifier(process: String?, bundle: String?) -> String? {
+        (process ?? bundle).flatMap { NotchPlaybackCommand.validIdentifier($0) ? $0 : nil }
+    }
+
     static func eligible(_ sources: [NotchPlaybackSource], includeOtherPlayers: Bool) -> [NotchPlaybackSource] {
         sources.filter { $0.pid > 0 && $0.isAudioOnly && $0.isPlaying
             && NotchPlaybackCommand.validIdentifier($0.bundleIdentifier)

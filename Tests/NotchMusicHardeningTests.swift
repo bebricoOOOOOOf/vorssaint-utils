@@ -183,6 +183,11 @@ enum NotchMusicHardeningTests {
                      "music-only mode does not automatically discover unrelated output apps")
         suite.expect(NotchAudioSourceSupport.eligible([output, musicOutput], includeOtherPlayers: true) == [output, musicOutput],
                      "other-player mode includes apps that publish no track")
+        suite.expect(NotchAudioSourceSupport.bundleIdentifier(process: nil, bundle: "org.example.player") == "org.example.player"
+                     && NotchAudioSourceSupport.bundleIdentifier(process: "org.example.app", bundle: "org.example.bundle") == "org.example.app"
+                     && NotchAudioSourceSupport.bundleIdentifier(process: nil, bundle: nil) == nil
+                     && NotchAudioSourceSupport.bundleIdentifier(process: nil, bundle: "") == nil,
+                     "an output keeps a player whose process has no bundle identifier, as Now Playing does")
         let audio = NotchAudioSourceSupport.playback(for: output)
         suite.expect(audio.isAudioOnly && audio.track.title == "Output App" && audio.track.appPID == 77,
                      "an output-only presentation identifies its app rather than inventing a track")

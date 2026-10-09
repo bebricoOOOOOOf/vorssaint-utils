@@ -94,7 +94,9 @@ final class NotchAudioSourceReader: @unchecked Sendable {
                   Self.readPID(object, &pid), pid > 0,
                   let app = ResponsibleProcess.regularAppOwner(of: pid), !app.isTerminated,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
-                  let bundle = app.bundleIdentifier, NotchPlaybackCommand.validIdentifier(bundle),
+                  let bundle = NotchAudioSourceSupport.bundleIdentifier(
+                      process: app.bundleIdentifier,
+                      bundle: app.bundleURL.flatMap { Bundle(url: $0)?.bundleIdentifier }),
                   !sources.contains(where: { $0.pid == app.processIdentifier }) else { continue }
             let category = app.bundleURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "LSApplicationCategoryType") as? String }
             sources.append(NotchPlaybackSource(pid: app.processIdentifier, bundleIdentifier: bundle,
