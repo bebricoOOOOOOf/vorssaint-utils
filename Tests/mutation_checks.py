@@ -905,6 +905,11 @@ MUTATIONS = [
      "Sources/Vorssaint/UI/MenuPanel/MixerSection.swift",
      "                        .help(arrangementStrings.arrange)\n", "",
      "the reorder hint remains on both the app icon and name"),
+    ("new wheel input keeps the previous pane's glide budget", "pointer-input",
+     "Sources/Vorssaint/Services/SmoothScrollService.swift",
+     "|| glideFromContinuous != traits.isContinuous || retargeted {",
+     "|| glideFromContinuous != traits.isContinuous {",
+     "fresh input in another pane drops the old tail and fractional carry immediately"),
 ]
 
 

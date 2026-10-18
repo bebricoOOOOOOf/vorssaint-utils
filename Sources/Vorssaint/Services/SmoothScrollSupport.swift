@@ -16,22 +16,25 @@ enum SmoothScrollSupport {
         let horizontal: Double
     }
 
-    /// A smoothed wheel gesture stays routed to the point where that glide
-    /// began. Quartz otherwise hit-tests each synthetic frame at the pointer's
-    /// current position, so moving the mouse during the tail can scroll a
-    /// different window or a different scroll view.
-    struct TargetLatch {
-        private(set) var point: CGPoint?
+    struct Target: Equatable {
+        let point: CGPoint
+        let processID: Int32
+        let windowNumber: Int
+    }
 
-        mutating func location(for input: CGPoint, startsNewGlide: Bool) -> CGPoint {
-            if startsNewGlide || point == nil {
-                point = input
-            }
-            return point ?? input
+    /// Only accepted wheel input updates the target. Moving the pointer while
+    /// the tail runs leaves it alone; a fresh tick elsewhere starts a new glide.
+    struct TargetLatch {
+        private(set) var target: Target?
+
+        mutating func update(_ input: Target) -> Bool {
+            let changed = target != input
+            target = input
+            return changed
         }
 
         mutating func reset() {
-            point = nil
+            target = nil
         }
     }
 
@@ -204,8 +207,8 @@ enum SmoothScrollSupport {
     }
 
     /// A vertical wheel tick with Shift held scrolls sideways instead. That
-    /// redirect happens above the event tap, so once the original tick is
-    /// swallowed the glide has to perform it. Measured against a scroll view:
+    /// redirect normally happens at the receiver, so a continuous glide has
+    /// to perform it before replacing the original tick. Measured against a scroll view:
     /// a tick of one line with Shift moves the content the same way a
     /// horizontal delta of the same sign does, so the tick keeps its sign. A
     /// wheel that already reports a horizontal axis is left alone so its

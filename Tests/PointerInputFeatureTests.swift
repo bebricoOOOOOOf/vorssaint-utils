@@ -796,16 +796,18 @@ enum PointerInputFeatureTests {
         suite.expect(smoothEngine.remainingVertical == 40,
                "one wheel tick queues one step of glide")
         var scrollTarget = SmoothScrollSupport.TargetLatch()
-        let firstScrollPoint = CGPoint(x: 120, y: 240)
-        let movedPointerPoint = CGPoint(x: 900, y: 600)
-        suite.expect(scrollTarget.location(for: firstScrollPoint, startsNewGlide: true) == firstScrollPoint,
-               "a smooth-scroll glide latches the point where its first wheel tick landed")
-        suite.expect(scrollTarget.location(for: movedPointerPoint, startsNewGlide: false) == firstScrollPoint,
-               "pointer movement cannot retarget an active smooth-scroll glide")
+        let firstScrollTarget = SmoothScrollSupport.Target(
+            point: CGPoint(x: 120, y: 240), processID: 41, windowNumber: 100)
+        let nextScrollTarget = SmoothScrollSupport.Target(
+            point: CGPoint(x: 900, y: 600), processID: 42, windowNumber: 200)
+        suite.expect(scrollTarget.update(firstScrollTarget)
+                && !scrollTarget.update(firstScrollTarget) && scrollTarget.target == firstScrollTarget,
+               "wheel input at the same target can extend the existing glide")
+        suite.expect(scrollTarget.update(nextScrollTarget) && scrollTarget.target == nextScrollTarget,
+               "fresh wheel input elsewhere replaces the old glide target immediately")
         scrollTarget.reset()
-        suite.expect(scrollTarget.point == nil
-                && scrollTarget.location(for: movedPointerPoint, startsNewGlide: true) == movedPointerPoint,
-               "a finished glide releases its target so the next scroll can land elsewhere")
+        suite.expect(scrollTarget.target == nil,
+               "a finished or cancelled glide releases its target")
         smoothEngine.add(vertical: 80, horizontal: 20)
         suite.expect(smoothEngine.remainingVertical == 120 && smoothEngine.remainingHorizontal == 20,
                "same-direction input adds to what is left on each axis")
