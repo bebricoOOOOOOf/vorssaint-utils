@@ -13,7 +13,13 @@ enum SwitcherActivationTests {
 
     final class App {
         static let current = App(processIdentifier: 1)!
+        static var executablePaths: [pid_t: String] = [:]
+        static var names: [pid_t: String] = [:]
+        static var hiddenPIDs: Set<pid_t> = []
         let processIdentifier: pid_t
+        var executableURL: URL? { Self.executablePaths[processIdentifier].map { URL(fileURLWithPath: $0) } }
+        var localizedName: String? { Self.names[processIdentifier] }
+        var isHidden: Bool { Self.hiddenPIDs.contains(processIdentifier) }
         var isTerminated = false
         init?(processIdentifier: pid_t) {
             guard processIdentifier > 0 else { return nil }
@@ -40,12 +46,14 @@ enum SwitcherActivationTests {
         }
     }
     enum Bridge {
+        typealias NSRunningApplication = App
         static var processForPID: ((pid_t, UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus)?
         static var setFrontProcess: ((UnsafeMutablePointer<ProcessSerialNumber>, CGWindowID, UInt32) -> CGError)?
         static var postEventRecord: ((UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> CGError)?
     }
     static func reset(raise: Bool = true, front: CGError = .success, down: CGError = .success, up: CGError = .success) {
         events = []; records = []; canRaise = raise
+        App.executablePaths = [:]; App.names = [:]; App.hiddenPIDs = []
         Bridge.processForPID = { pid, _ in events.append("owner:\(pid)"); return noErr }
         Bridge.setFrontProcess = { _, id, _ in events.append("front:\(id)"); return front }
         Bridge.postEventRecord = { _, bytes in
@@ -64,7 +72,7 @@ enum SwitcherActivationTests {
         // The press that makes the window key must name the window and aim far
         // past its bottom-right: a point near the frame's corner hits the resize
         // border, and some apps turn a NaN point into their top-left corner.
-        // Without a release, no control can be activated wherever it lands.
+        // Compatibility layers must skip this input path altogether.
         let windowIDBytes = withUnsafeBytes(of: CGWindowID(77).littleEndian, Array.init)
         let farPointBytes = withUnsafeBytes(of: CGPoint(x: 300_000, y: 300_000), Array.init)
         suite.expect(records.count == 1 && records.allSatisfy { record in
@@ -93,13 +101,42 @@ enum SwitcherActivationTests {
         suite.expect(events.prefix(3) == ["yield:20", "activate:20:false", "owner:30"],
                      "host menus are activated before fronting an accessory owner's window")
         suite.expect(events.last == "raise:77:30:false", "helper window focusing does not replace host activation")
+        // Unhiding an app that is not hidden raises every one of its windows.
         reset(); _ = Activator.activateSource(pid: 20, windowID: nil, windowOwnerPID: nil)
-        suite.expect(events == ["unhide", "yield:20", "activate:20:false"], "returning without a saved window does not raise all source windows")
+        suite.expect(events == ["yield:20", "activate:20:false"],
+                     "returning to a visible source without a saved window raises none of its other windows")
+        reset(); App.hiddenPIDs = [20]
+        _ = Activator.activateSource(pid: 20, windowID: 77, windowOwnerPID: 20)
+        suite.expect(events.first == "unhide" && events.contains("front:77"), "a hidden source is shown again before its window returns")
         reset(); _ = Activator.activateSource(pid: 20, windowID: 77, windowOwnerPID: 20)
         suite.expect(!events.contains("activate:20:true") && events.contains("front:77"), "returning to an identified source still selects its window")
         reset(); Activator.activateApp(app, plan: SwitcherSupport.activationPlan(targetsSpecificWindow: false))
         suite.expect(events == ["yield:20", "activate:20:true"], "explicit app selection still brings all its windows forward")
         reset(); let restored = Activator.activateSource(pid: -1, windowID: nil, windowOwnerPID: nil)
         suite.expect(!restored && events.isEmpty, "an exited source cannot receive restoration")
+
+        for path in ["/usr/local/bin/wine64-preloader",
+                     "/Applications/Game.app/Contents/MacOS/wine64-preloader",
+                     "/Users/u/Library/Bottles/winetemp-8f3a21/Game"] {
+            reset(); App.executablePaths[20] = path
+            select()
+            suite.expect(events == ["owner:20", "front:77", "raise:77:20:false"] && records.isEmpty,
+                         "Wine receives exact-window activation without a mouse press: \(path)")
+            select()
+            suite.expect(records.isEmpty, "a repeated focus pass never injects a game mouse button")
+        }
+        reset(); App.names[20] = "wine-preloader"
+        Bridge.postEventRecord = nil
+        select()
+        suite.expect(events.contains("front:77") && !events.contains("activate:20:false") && records.isEmpty,
+                     "Wine can be focused without an event transport when only its process name is known")
+        reset(raise: false); App.executablePaths[30] = "/usr/local/bin/wine64-preloader"
+        select(owner: 30)
+        suite.expect(events.contains("activate:20:false") && records.isEmpty,
+                     "a Wine window owner retains cooperative recovery without clicking, even under a native host")
+        reset(front: .failure); App.names[20] = "wine-preloader"
+        select()
+        suite.expect(events.contains("activate:20:false") && records.isEmpty,
+                     "a failed Wine front request falls back to app activation without a mouse event")
     }
 }

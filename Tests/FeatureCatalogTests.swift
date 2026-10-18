@@ -608,6 +608,36 @@ enum FeatureCatalogTests {
             suite.expect(false, "linear scrolling availability suite can be created")
         }
 
+        let watchSuiteName = "com.vorssaint.tests.notch-watch-availability.\(UUID().uuidString)"
+        if let watchDefaults = UserDefaults(suiteName: watchSuiteName) {
+            Defaults.migrateNotchWatchAvailability(in: watchDefaults)
+            suite.expect(watchDefaults.object(forKey: AppFeature.notchWatch.availabilityKey) == nil,
+                   "Watch keeps its installed default where the island was never left out")
+            watchDefaults.set(true, forKey: AppFeature.notch.availabilityKey)
+            Defaults.migrateNotchWatchAvailability(in: watchDefaults)
+            suite.expect(watchDefaults.object(forKey: AppFeature.notchWatch.availabilityKey) == nil,
+                   "an installed island keeps Watch among its extensions")
+            // A first-run setup saved every feature it knew, Watch not yet among them.
+            for feature in AppFeature.features(in: .dynamicIsland) where feature != .notchWatch {
+                watchDefaults.set(false, forKey: feature.availabilityKey)
+            }
+            Defaults.migrateNotchWatchAvailability(in: watchDefaults)
+            let isAvailable: (AppFeature) -> Bool = { feature in
+                watchDefaults.object(forKey: feature.availabilityKey) as? Bool
+                    ?? (AppFeature.availabilityDefaults[feature.availabilityKey] as? Bool ?? false)
+            }
+            suite.expect(watchDefaults.object(forKey: AppFeature.notchWatch.availabilityKey) as? Bool == false
+                    && !FeatureVisibilitySupport.isPageVisible(.notch, isAvailable: isAvailable),
+                   "a setup that left the island out keeps Watch and the Dynamic Island page out after updating")
+            watchDefaults.set(true, forKey: AppFeature.notchWatch.availabilityKey)
+            Defaults.migrateNotchWatchAvailability(in: watchDefaults)
+            suite.expect(watchDefaults.object(forKey: AppFeature.notchWatch.availabilityKey) as? Bool == true,
+                   "a Watch install chosen later is never undone by the migration")
+            watchDefaults.removePersistentDomain(forName: watchSuiteName)
+        } else {
+            suite.expect(false, "Watch availability suite can be created")
+        }
+
         // The Features page offers installed switches that were never turned
         // on. Only switches nothing else leans on qualify, and only while
         // they are off and were never saved.
@@ -665,9 +695,9 @@ enum FeatureCatalogTests {
                 == Array(AppFeature.features(in: .dynamicIsland).dropFirst()),
                "the Dynamic Island's extensions are every other feature of its section")
         suite.expect(AppFeature.notch.initialInstallGroup
-                        == AppFeature.features(in: .dynamicIsland).filter { $0 != .notchMascot }
+                        == AppFeature.features(in: .dynamicIsland).filter { $0 != .notchMascot && $0 != .notchAgents }
                      && AppFeature.mixer.initialInstallGroup == [.mixer],
-                     "choosing the island for the first time includes its extensions without changing other features")
+                     "choosing the island keeps Agents and the companion as separate installs")
         suite.expect(AppFeature.dynamicIslandExtensions.contains(.notchMascot)
                         && !AppFeature.notch.initialInstallGroup.contains(.notchMascot)
                         && AppFeature.notchMascot.permissions.isEmpty
@@ -1074,6 +1104,48 @@ enum FeatureCatalogTests {
         )
         suite.expect(unmappedFanTemperatures.isEmpty,
                "fan curves reject unknown Apple Silicon sensors instead of treating them as CPU")
+        // Apple M4 Pro (Mac16,8) under load: the base M4 set tops out at Tp0Y,
+        // 10 °C below the core that Tpx5 repeats.
+        let m4ProPlatform = TemperatureSensorSelector.platform(brandString: "Apple M4 Pro")
+        let m4ProFanTemperatures = FanControlPolicy.aggregatedTemperatures(
+            cpuReadings: [("Te05", 74.15), ("Tp01", 77.10), ("Tp0Y", 87.08),
+                          ("Tp0U", 97.84), ("Tpx5", 97.84), ("Tp29", 95.81),
+                          ("Tex1", 79.64)],
+            gpuReadings: [71.2],
+            platform: m4ProPlatform
+        )
+        suite.expectClose(m4ProFanTemperatures.first { $0.source == .hottestCPU }?.celsius ?? -1,
+                    97.84,
+                    "M4 Pro fan curves follow its hottest CPU core")
+        suite.expectClose(m4ProFanTemperatures.first { $0.source == .averageCPU }?.celsius ?? -1,
+                    88.74,
+                    "M4 Pro fan curves average its own CPU sensor set")
+        suite.expectClose(m4ProFanTemperatures.first { $0.source == .hottestSoC }?.celsius ?? -1,
+                    97.84,
+                    "M4 Pro fan curves keep the CPU in the SoC reading")
+        // The same Mac at light idle with its P cores parked, plus a key
+        // outside the set running hot the way Tp0W does on the base M4: the
+        // hottest SoC curve must not raise the fans for it.
+        let m4ProIdleFanTemperatures = FanControlPolicy.aggregatedTemperatures(
+            cpuReadings: [("Te05", 54.80), ("Te06", 58.05), ("Tex1", 58.05),
+                          ("Tex3", 57.19), ("Tpx5", 0), ("Tp0W", 68.0)],
+            gpuReadings: [50.0],
+            platform: m4ProPlatform
+        )
+        suite.expectClose(m4ProIdleFanTemperatures.first { $0.source == .hottestSoC }?.celsius ?? -1,
+                    58.05,
+                    "an idle M4 Pro keeps an auxiliary hotspot out of the hottest SoC curve")
+        suite.expectClose(m4ProIdleFanTemperatures.first { $0.source == .hottestCPU }?.celsius ?? -1,
+                    58.05,
+                    "an idle M4 Pro fan curve reads its hottest E core")
+        let m4FanTemperatures = FanControlPolicy.aggregatedTemperatures(
+            cpuReadings: [("Tp01", 46.12), ("Te05", 45.01), ("Tp0W", 62.56)],
+            gpuReadings: [],
+            platform: TemperatureSensorSelector.platform(brandString: "Apple M4")
+        )
+        suite.expectClose(m4FanTemperatures.first { $0.source == .hottestCPU }?.celsius ?? -1,
+                    46.12,
+                    "base M4 fan curves keep using its mapped cores")
         suite.expect(FanControlPolicy.telemetryReadings(expectedCount: 1, readings: [1_200]) == [1_200]
                 && FanControlPolicy.telemetryReadings(expectedCount: 2,
                                                       readings: [1_200, 1_350]) == [1_200, 1_350],
@@ -2237,15 +2309,19 @@ enum FeatureCatalogTests {
 
         var ddcReply: [UInt8] = [0x6E, 0x88, 0x02, 0x00, 0x10, 0x00, 0x00, 0x64, 0x00, 0x32]
         ddcReply.append(ddcReply.reduce(UInt8(0x50)) { $0 ^ $1 })
-        suite.expect(BrightnessSupport.parseReply(ddcReply)?.current == 0x32
-                && BrightnessSupport.parseReply(ddcReply)?.maximum == 0x64,
+        suite.expect(BrightnessSupport.parseReply(ddcReply, code: 0x10)?.current == 0x32
+                && BrightnessSupport.parseReply(ddcReply, code: 0x10)?.maximum == 0x64,
                "a valid DDC reply yields the current and maximum values")
         var corrupted = ddcReply
         corrupted[7] ^= 0xFF
-        suite.expect(BrightnessSupport.parseReply(corrupted) == nil,
+        suite.expect(BrightnessSupport.parseReply(corrupted, code: 0x10) == nil,
                "a corrupted DDC reply fails its checksum and reads as no reply")
-        suite.expect(BrightnessSupport.parseReply([0x6E, 0x88]) == nil,
+        suite.expect(BrightnessSupport.parseReply([0x6E, 0x88], code: 0x10) == nil,
                "a short DDC reply reads as no reply")
+        var staleReply: [UInt8] = [0x6E, 0x88, 0x02, 0x00, 0x62, 0x00, 0x00, 0x64, 0x00, 0x2C]
+        staleReply.append(staleReply.reduce(UInt8(0x50)) { $0 ^ $1 })
+        suite.expect(BrightnessSupport.parseReply(staleReply, code: 0x10) == nil,
+               "a reply for another control reads as no reply instead of that control's value")
 
         suite.expect(BrightnessSupport.sanitizedMaximum(0) == 100 && BrightnessSupport.sanitizedMaximum(255) == 255,
                "a display reporting no range falls back to the conventional scale")
@@ -2441,6 +2517,20 @@ enum FeatureCatalogTests {
         suite.expect(BrightnessSupport.drawableDisplayIDs(
             onlineDisplayIDs: [1, 2], activeDisplayIDs: [1, 2, 9], virtualDisplayIDs: [2]) == [1],
                "only online active displays with a visible picture prevent recovery")
+        // Measured on a MacBook whose panel (1) mirrors an HDMI monitor (2)
+        // beside an extended one (3): the active list was [2, 3].
+        let mirrored = BrightnessSupport.participatingDisplayIDs(
+            activeDisplayIDs: [2, 3], mirrorSources: [1: 2])
+        suite.expect(mirrored == [1, 2, 3],
+               "a panel mirroring an active monitor keeps its controls")
+        suite.expect(BrightnessSupport.canDisableDisplay(
+            drawableDisplayIDs: BrightnessSupport.drawableDisplayIDs(
+                onlineDisplayIDs: [1, 2, 3], activeDisplayIDs: mirrored, virtualDisplayIDs: []),
+            target: 1),
+               "a mirroring panel is a drawable display its power button can switch off")
+        suite.expect(BrightnessSupport.participatingDisplayIDs(
+            activeDisplayIDs: [3], mirrorSources: [1: 2]) == [3],
+               "a display mirroring a source that is off shows no picture")
         suite.expect(BrightnessSupport.drawableDisplayIDs(
             onlineDisplayIDs: [2], activeDisplayIDs: [2], virtualDisplayIDs: [2]).isEmpty,
                "a virtual-only active display leaves the machine effectively headless")

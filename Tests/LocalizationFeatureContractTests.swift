@@ -82,6 +82,13 @@ enum LocalizationFeatureContractTests {
             expectFormat(strings.cutMovedPluralFormat, ["d"], "\(prefix) cut plural format")
             expectFormat(strings.uninstallerSelectedFormat, ["d", "d"], "\(prefix) uninstaller selected format")
             expectFormat(strings.uninstallerFreedFormat, ["@"], "\(prefix) uninstaller freed format")
+            for format in [strings.uninstallerRefusedSystemFormat, strings.uninstallerRefusedSharedFormat,
+                           strings.uninstallerRefusedNestedFormat, strings.uninstallerRefusedSelfFormat,
+                           strings.uninstallerRefusedLinkFormat, strings.uninstallerRefusedUnidentifiedFormat] {
+                expectFormat(format, ["@"], "\(prefix) uninstaller refusal format")
+            }
+            expectFormat(strings.uninstallerRefusedNotApp, [], "\(prefix) uninstaller not-an-app note")
+            expectFormat(strings.uninstallerPickerHiddenNote, [], "\(prefix) uninstaller unlisted apps note")
             expectFormat(strings.shelfSelectedFormat, ["d"], "\(prefix) shelf selection format")
             suite.expect(!strings.shelfClearOnClose.isEmpty
                    && !strings.shelfClearOnCloseCaption.isEmpty
@@ -145,6 +152,12 @@ enum LocalizationFeatureContractTests {
                    && !strings.switcherAppearanceDelay.contains("—")
                    && !strings.switcherAppearanceDelayCaption.contains("—"),
                    "\(prefix) App Switcher appearance-delay labels are present without em dash")
+            suite.expect(!strings.switcherMaxColumns.isEmpty
+                   && !strings.switcherMaxColumnsCaption.isEmpty
+                   && !strings.switcherMaxColumnsAuto.isEmpty
+                   && !strings.switcherMaxColumns.contains("—")
+                   && !strings.switcherMaxColumnsCaption.contains("—"),
+                   "\(prefix) App Switcher max-columns labels are present without em dash")
             suite.expect(!strings.switcherWindowlessApps.isEmpty
                    && !strings.switcherWindowlessApps.contains("—"),
                    "\(prefix) App Switcher windowless apps title is present without em dash")
@@ -163,6 +176,8 @@ enum LocalizationFeatureContractTests {
                    && !strings.switcherWindowlessAppsFinder.contains("—")
                    && !strings.switcherWindowlessAppsAll.contains("—"),
                    "\(prefix) App Switcher windowless apps choices are all present without em dash")
+            expectFormat(strings.switcherWindowlessAppsLockedFormat, ["@"],
+                         "\(prefix) App Switcher windowless apps locked reason names the shortcut takeover")
             suite.expect(!strings.diskAvailable.isEmpty
                    && !strings.diskPurgeable.isEmpty
                    && !strings.diskAvailable.contains("—")
@@ -425,6 +440,7 @@ enum LocalizationFeatureContractTests {
             ("finderRenameDefault", GlobalShortcut.finderRenameDefault),
             ("keepAwakeDefault", GlobalShortcut.keepAwakeDefault),
             ("micMuteDefault", GlobalShortcut.micMuteDefault),
+            ("notchDefault", GlobalShortcut.notchDefault),
             ("pastePlainDefault", GlobalShortcut.pastePlainDefault),
             ("pointerNextDisplayDefault", GlobalShortcut.pointerNextDisplayDefault),
             ("quickLauncherDefault", GlobalShortcut.quickLauncherDefault),
@@ -460,7 +476,7 @@ enum LocalizationFeatureContractTests {
             ("windowLayoutTopLeftDefault", GlobalShortcut.windowLayoutTopLeftDefault),
             ("windowLayoutTopRightDefault", GlobalShortcut.windowLayoutTopRightDefault),
         ]
-        suite.expect(defaultShortcuts.count == 41, "every default shortcut is in the round trip")
+        suite.expect(defaultShortcuts.count == 42, "every default shortcut is in the round trip")
         var brokenShortcuts: [String] = []
         for (name, shortcut) in defaultShortcuts {
             guard let restored = GlobalShortcut(storageValue: shortcut.storageValue),

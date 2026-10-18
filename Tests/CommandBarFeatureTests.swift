@@ -126,6 +126,10 @@ enum CommandBarFeatureTests {
         suite.expect(math("2026-07-27") == nil && math("27/07/2026") == nil && math("10:30") == nil,
                "a date or a time is never answered as a sum")
         suite.expect(math("100-50") == "50", "two numbers around a minus are still a subtraction")
+        suite.expect(math("100 - 20 - 30") == "50" && math("2 - 1 - 1") == "0" && math("8 / 2 / 2") == "2",
+               "three numbers spaced apart are a sum, since no date is written that way")
+        suite.expect(math("10-5-3") == nil && math("8/2/2") == nil && math("10 : 30") == nil,
+               "the unspaced shapes that can be a date, and a spaced time, are still left alone")
         suite.expect(math("SDL_VIDEODRIVER=") == nil && math("x=5") == nil,
                "an assignment shape is not an expression")
         suite.expect(math("7+3=") == "10", "a trailing equals sign is just habit")
@@ -151,6 +155,19 @@ enum CommandBarFeatureTests {
         suite.expect(math("e-mail") == nil, "a hyphenated word is not a subtraction")
         suite.expect(math("9999999999999999*99")?.contains("e") == true,
                "a number past plain reading switches notation")
+        suite.expect(math("12345678901+1") == "12,345,678,902" && math("987654321098+1") == "987,654,321,099"
+                     && math("2^39") == "549,755,813,888" && math("10000000000+0.5") == "10,000,000,000.5"
+                     && math("1234567890.25+0") == "1,234,567,890.25",
+               "an answer short of that keeps every digit it prints")
+        suite.expect(CommandBarMath.evaluate("100000.1-100000", decimalSeparator: ".", groupingSeparator: ",")
+                         .map { CommandBarMath.reusableExpression(for: $0, decimalSeparator: ".") } == "0.1",
+               "a small difference of large numbers still loses its binary noise")
+        suite.expect(CommandBarMath.evaluate("1234567890123+1", decimalSeparator: ".", groupingSeparator: ",")
+                         .map { CommandBarMath.reusableExpression(for: $0, decimalSeparator: ".") } == "1234567890124",
+               "reusing an answer shown in scientific notation keeps every whole digit")
+        suite.expect(CommandBarMath.evaluate("2^56", decimalSeparator: ".", groupingSeparator: ",")
+                         .map { CommandBarMath.reusableExpression(for: $0, decimalSeparator: ".") } == "7.20575940379279e+16",
+               "reusing a huge answer keeps fifteen digits without binary noise")
 
         // The same numbers as the owner's Mac writes them.
         suite.expect(CommandBarMath.evaluate("1.234,5 + 1",
@@ -686,6 +703,12 @@ enum CommandBarFeatureTests {
         suite.expect(InputSourceSelection.asciiLayoutID(currentID: asciiCapableMethod.id,
                                                   snapshots: [asciiCapableMethod, latinSource]) == latinSourceID,
                "an ASCII-capable input method still moves to a plain layout")
+        suite.expect(InputSourceSelection.shortCode(languages: ["ru"]) == "RU",
+               "the island's layout notice reads the source's language as a short code")
+        suite.expect(InputSourceSelection.shortCode(languages: ["zh-Hans", "zh"]) == "ZH",
+               "a script-qualified language still reads as its two letters")
+        suite.expect(InputSourceSelection.shortCode(languages: []).isEmpty,
+               "a source with no language leaves the notice its mark alone")
 
         let commandBarServiceSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarService.swift",
@@ -703,6 +726,10 @@ enum CommandBarFeatureTests {
         suite.expect(commandBarServiceSource.contains("UninstallerSupport.acceptedApplicationIDs(apps)")
                 && commandBarServiceSource.contains("uninstallable: uninstallableAppIDs"),
                "the uninstall browse lists only the apps the background scan saw the uninstaller accept")
+        suite.expect(commandBarServiceSource.range(
+                of: #"installedApplications\(\s*includeSystemApplications: true,\s*includeBundledApplications: true,"#,
+                options: .regularExpression) != nil,
+               "the bar's app scan lists the apps other apps ship, such as Xcode's tools")
         let uninstallCatalogSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarCatalog.swift",
             encoding: .utf8)) ?? ""
@@ -1226,7 +1253,8 @@ enum CommandBarFeatureTests {
                 && !pageVisible(.commandBar, available: []),
                "the command bar page follows its hub switch")
         suite.expect(!SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarUsage)
-                && !SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarQueryHabits),
+                && !SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarQueryHabits)
+                && !SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarQueryHabitKey),
                "what the person runs most never travels in a backup")
         suite.expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarShortcutEnabled)
                 && SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarShortcut)
@@ -1556,33 +1584,18 @@ enum CommandBarFeatureTests {
             .components(separatedBy: "private var storedHiddenKeys").first ?? ""
         suite.expect(runRowCode.contains("!isVisible, let app = installedApp(for: entry)")
                 && runRowCode.contains("CommandBarRowShortcuts.hidesAppInFront(")
-                && runRowCode.contains("running.hide() {"),
-               "only a closed bar hides an app row, through the shared rule, and a refused hide opens it")
+                && runRowCode.contains("running.hide()\n            return")
+                && !runRowCode.contains("running.hide() {"),
+               "only a closed bar hides an app row, through the shared rule, whatever hide() returns")
         suite.expect(runRowCode.contains(
                     "NSWorkspace.shared.frontmostApplication?.processIdentifier == running.processIdentifier")
                 && runRowCode.contains("ownsFrontWindow: WindowServerSupport.frontWindowOwner(")
                 && runRowCode.contains("in: WindowServerSupport.onScreenWindowInfo()) == running.processIdentifier"),
                "an app shortcut hides only the app in front whose window is the one in front")
 
-        // An app the uninstaller removed frees its keys for another app.
-        suite.expect(CommandBarRowShortcuts.keyFreed(
-                    byRemovingAppAt: "/Applications/Thunderbird.app", bundleID: "org.mozilla.thunderbird",
-                    remainingBundleIDs: ["com.apple.mail"]) == "app.bundle.org.mozilla.thunderbird",
-               "a removed app's shortcut is freed under the row the bar listed it as")
-        suite.expect(CommandBarRowShortcuts.keyFreed(
-                    byRemovingAppAt: "/Applications/Tool.app", bundleID: nil,
-                    remainingBundleIDs: []) == "app./Applications/Tool.app",
-               "an app with no bundle ID frees the row keyed by its path")
-        suite.expect(CommandBarRowShortcuts.keyFreed(
-                    byRemovingAppAt: "/Users/me/Applications/Thunderbird.app",
-                    bundleID: "org.mozilla.thunderbird",
-                    remainingBundleIDs: ["org.mozilla.thunderbird"]) == nil,
-               "another installed copy of the app keeps the shortcut")
         suite.expect(CommandBarRowShortcuts.appKey(bundleID: "com.apple.mail", path: "/Applications/Mail.app")
                 == "app.bundle.com.apple.mail",
                "an app with a bundle ID is listed by it, not by where it lives")
-        // The uninstaller frees the row under this same key, so the catalog
-        // must build it here rather than spell the format out again.
         suite.expect(commandBarCatalogLines.contains {
                     $0.contains("stableKey: CommandBarRowShortcuts.appKey(bundleID: app.bundleID, path: app.id)")
                 },
@@ -1671,6 +1684,34 @@ enum CommandBarFeatureTests {
         pendingApp.cancel()
         suite.expect(pendingApp.take(in: appBindings, isAvailable: true) == nil,
                "suspending shortcuts or running another command cancels a queued app launch")
+        // Cleanup of application shortcuts when an app is removed (issue #2727)
+        let rowsKey = "app.bundle.com.rows.Rows"
+        let ghosttyKey = "app.bundle.com.ghostty.Ghostty"
+        let rowsShortcut = optionB
+        var multiAppBindings = CommandBarRowShortcuts.setting(rowsShortcut, for: rowsKey, in: [:])
+        multiAppBindings = CommandBarRowShortcuts.setting(optionN, for: "app.bundle.other", in: multiAppBindings)
+        suite.expect(CommandBarRowShortcuts.assignmentIssue(rowsShortcut, for: ghosttyKey, in: multiAppBindings)
+                == .occupied(rowsKey),
+               "before cleanup, a new app assigning an occupied shortcut encounters a conflict")
+        let uninstalledKeys = CommandBarRowShortcuts.applicationStableKeys(
+            bundleIDs: ["com.rows.Rows"], paths: ["/Applications/Rows.app"])
+        suite.expect(uninstalledKeys.contains(rowsKey) && uninstalledKeys.contains("app./Applications/Rows.app"),
+               "applicationStableKeys identifies both bundle ID and file path keys")
+        let cleanedBindings = CommandBarRowShortcuts.removing(keys: uninstalledKeys, in: multiAppBindings)
+        suite.expect(cleanedBindings[rowsKey] == nil && cleanedBindings["app.bundle.other"] == optionN,
+               "removing uninstalled app keys clears its shortcut while preserving other apps")
+        suite.expect(CommandBarRowShortcuts.assignmentIssue(rowsShortcut, for: ghosttyKey, in: cleanedBindings) == nil,
+               "after cleanup, the freed shortcut is immediately available for other applications")
+        let testAliases = ["app.bundle.com.rows.Rows": "Rows Spreadsheets", "app.bundle.other": "Other App"]
+        suite.expect(CommandBarPreferences.removingAliases(for: uninstalledKeys, in: testAliases) == ["app.bundle.other": "Other App"],
+               "removing uninstalled app keys cleans up associated aliases")
+        let testPins = ["app.bundle.com.rows.Rows", "app.bundle.other"]
+        suite.expect(CommandBarPreferences.removingPins(for: uninstalledKeys, in: testPins) == ["app.bundle.other"],
+               "removing uninstalled app keys cleans up associated pins")
+        let testHidden: Set<String> = ["app.bundle.com.rows.Rows", "app.bundle.other"]
+        suite.expect(CommandBarPreferences.removingHidden(for: uninstalledKeys, in: testHidden) == ["app.bundle.other"],
+               "removing uninstalled app keys cleans up associated hidden entries")
+
         suite.expect(SettingsBackupSupport.exportKeys().isSuperset(of: [DefaultsKey.commandBarRowShortcuts,
                     DefaultsKey.commandBarAliases, DefaultsKey.commandBarPins]),
                "the app center reuses shortcut, alias and favorite preferences carried by settings backups")
@@ -1747,6 +1788,9 @@ enum CommandBarFeatureTests {
                "the answer says which weekday it lands on")
         suite.expect(dated("days until 12/25")?.contains("150") == true,
                "how far away a written date is, counted in whole days")
+        // 581 days from 28 July 2026 is 29 February 2028; 216 would be 1 March 2027.
+        suite.expect(dated("days until 2/29") == "581 days",
+               "a leap day counts to the next 29 February, not to the 1 March after it")
         suite.expect(CommandBarDates.evaluate("time in tokyo", now: tuesday, calendar: gregorian,
                                         locale: english)?.detail.hasPrefix("Tokyo") == true,
                "the clock somewhere else, from the time zones the Mac already knows")
@@ -2169,17 +2213,6 @@ enum CommandBarFeatureTests {
         suite.expect(habitStoreCache.store == queryHabits,
                "reloading preferences replaces the decoded store with persisted learning")
 
-        let sessionQuery = CommandBarQueryHabits.prepare("session choice")
-        let sessionChoices = CommandBarQueryHabits.recording(
-            [:], preparedQuery: sessionQuery, resultID: "app.session", now: barNow)
-        suite.expect(!sessionQuery.isEmpty && CommandBarQueryHabits.boost(
-            for: "app.session", preparedQuery: CommandBarQueryHabits.prepare("session choice"),
-            store: sessionChoices, now: barNow) > 0,
-            "query learning works immediately within the process without loading a stored key")
-        suite.expect(CommandBarQueryHabits.boost(
-            for: "app.session", preparedQuery: CommandBarQueryHabits.prepare("session choice", key: habitKey),
-            store: sessionChoices, now: barNow) == 0,
-            "a different session key cannot reuse past query learning")
         let completedEmoji = CommandBarCompletion.completedQuery(
             current: ":fire", title: "🔥  fire", matchTitle: "fire")
         suite.expect(completedEmoji == ":fire"
@@ -2210,17 +2243,49 @@ enum CommandBarFeatureTests {
 
         let learningDefaultsName = "com.vorssaint.tests.command-bar-learning"
         let learningDefaults = UserDefaults(suiteName: learningDefaultsName)!
+        learningDefaults.removePersistentDomain(forName: learningDefaultsName)
+        let firstInstallationKey = CommandBarLearning.installationKey(in: learningDefaults)
+        let savedChoice = CommandBarQueryHabits.recording(
+            [:], preparedQuery: CommandBarQueryHabits.prepare("wa", key: firstInstallationKey),
+            resultID: "app.whatsapp", now: barNow)
+        learningDefaults.set(CommandBarQueryHabits.encode(savedChoice),
+                             forKey: DefaultsKey.commandBarQueryHabits)
+        let reloadedKey = CommandBarLearning.installationKey(in: learningDefaults)
+        let reloadedChoice = CommandBarQueryHabits.decode(
+            learningDefaults.string(forKey: DefaultsKey.commandBarQueryHabits))
+        suite.expect(reloadedKey == firstInstallationKey
+                && CommandBarQueryHabits.boost(
+                    for: "app.whatsapp",
+                    preparedQuery: CommandBarQueryHabits.prepare("wa", key: reloadedKey),
+                    store: reloadedChoice, now: barNow) > 0,
+               "a chosen app keeps its search priority after loading preferences again")
+        let savedEmoji = CommandBarQueryHabits.recording(
+            reloadedChoice,
+            preparedQuery: CommandBarQueryHabits.prepare("thumb", key: reloadedKey),
+            resultID: "emoji.👍", now: barNow)
+        learningDefaults.set(CommandBarQueryHabits.encode(savedEmoji),
+                             forKey: DefaultsKey.commandBarQueryHabits)
+        suite.expect(CommandBarQueryHabits.boost(
+                    for: "emoji.👍",
+                    preparedQuery: CommandBarQueryHabits.prepare(
+                        "thumb", key: CommandBarLearning.installationKey(in: learningDefaults)),
+                    store: CommandBarQueryHabits.decode(
+                        learningDefaults.string(forKey: DefaultsKey.commandBarQueryHabits)),
+                    now: barNow) > 0,
+               "a chosen emoji keeps its search priority after loading preferences again")
         learningDefaults.set("usage", forKey: DefaultsKey.commandBarUsage)
-        learningDefaults.set("habits", forKey: DefaultsKey.commandBarQueryHabits)
-        CommandBarLearning.discardLegacyQueryHabits(in: learningDefaults)
-        suite.expect(learningDefaults.object(forKey: DefaultsKey.commandBarQueryHabits) == nil
-                && learningDefaults.string(forKey: DefaultsKey.commandBarUsage) == "usage",
-               "migration drops legacy query history while preserving general usage ranking")
-        learningDefaults.set("habits", forKey: DefaultsKey.commandBarQueryHabits)
         CommandBarLearning.forgetAll(in: learningDefaults)
         suite.expect(learningDefaults.object(forKey: DefaultsKey.commandBarUsage) == nil
-                && learningDefaults.object(forKey: DefaultsKey.commandBarQueryHabits) == nil,
+                && learningDefaults.object(forKey: DefaultsKey.commandBarQueryHabits) == nil
+                && learningDefaults.object(forKey: DefaultsKey.commandBarQueryHabitKey) != nil,
                "forgetting all learned use clears usage and query choices together")
+        learningDefaults.set("invalid", forKey: DefaultsKey.commandBarQueryHabitKey)
+        learningDefaults.set(CommandBarQueryHabits.encode(savedChoice),
+                             forKey: DefaultsKey.commandBarQueryHabits)
+        let replacementKey = CommandBarLearning.installationKey(in: learningDefaults)
+        suite.expect(replacementKey.count == 32 && replacementKey != firstInstallationKey
+                && learningDefaults.object(forKey: DefaultsKey.commandBarQueryHabits) == nil,
+               "an invalid local key discards digests that can no longer be matched")
         learningDefaults.removePersistentDomain(forName: learningDefaultsName)
 
         let barSuggestions = CommandBarUsage.suggestionIDs(
@@ -2294,6 +2359,9 @@ enum CommandBarInputSourceContract {
         static var acceptsSelection = true
         static var selected: [String] = []
         static func currentSourceID() -> String? { current }
+        static func currentReading() -> ProductionInputSourceSelection.Reading? {
+            .init(id: current, code: current.uppercased(), name: current)
+        }
         static func snapshots() -> [ProductionInputSourceSelection.Snapshot] {
             [.init(id: "original", isLayout: true, isASCIICapable: false),
              .init(id: "ascii", isLayout: true, isASCIICapable: true)]
@@ -2320,6 +2388,7 @@ enum CommandBarInputSourceContract {
         typealias UserDefaults = Preferences
         typealias InputSourceSelection = Sources
         typealias DispatchQueue = Queue
+        typealias NotchService = Island
         var suspendedInputSourceID: String?
         var presentationID = UUID()
     }
@@ -2331,15 +2400,57 @@ enum CommandBarInputSourceContract {
             Sources.selected = []
             Sources.acceptsSelection = true
             Preferences.enabled = true
+            Island.shared = Island()
+            Island.shared.inputSourceID = Sources.current
             return Service()
         }
         let normal = reset()
         normal.adoptASCIIInputSource()
+        Island.shared.inputSourceChanged()
         normal.restoreSuspendedInputSource()
         suite.expect(Sources.current == "ascii", "closing inside a key event defers keyboard restoration")
         Queue.drain()
         suite.expect(Sources.selected == ["ascii", "original"] && normal.suspendedInputSourceID == nil,
                      "ordinary close restores the original layout exactly once")
+        Island.shared.inputSourceChanged()
+        suite.expect(Island.shared.presented.isEmpty,
+                     "the borrowed layout and its return both leave the island's layout notice quiet")
+        for coalesced in [false, true] {
+            let manual = reset()
+            manual.adoptASCIIInputSource()
+            if !coalesced { Island.shared.inputSourceChanged() }
+            Sources.current = "de"
+            Island.shared.inputSourceChanged()
+            Island.shared.inputSourceChanged()
+            suite.expect(Island.shared.presented.map(\.title) == ["DE"],
+                         "a manual switch immediately after borrowing appears once, even with coalesced notifications")
+            Sources.current = "ascii"
+            Island.shared.inputSourceChanged()
+            suite.expect(Island.shared.presented.map(\.title) == ["DE", "ASCII"],
+                         "returning manually to the borrowed source is no longer an app-owned switch")
+            manual.restoreBorrowedInputSource()
+            Island.shared.inputSourceChanged()
+            Sources.current = "fr"
+            Island.shared.inputSourceChanged()
+            suite.expect(Island.shared.presented.map(\.title) == ["DE", "ASCII", "FR"],
+                         "restoration stays quiet without hiding the following manual switch")
+        }
+        let delayed = reset()
+        delayed.adoptASCIIInputSource()
+        Sources.current = "original"
+        Island.shared.inputSourceChanged()
+        Sources.current = "ascii"
+        Island.shared.inputSourceChanged()
+        suite.expect(Island.shared.presented.isEmpty,
+                     "an unchanged reading before a delayed selection lands does not lose its quiet marker")
+        let merged = reset()
+        merged.adoptASCIIInputSource()
+        merged.restoreBorrowedInputSource()
+        Island.shared.inputSourceChanged()
+        Sources.current = "ascii"
+        Island.shared.inputSourceChanged()
+        suite.expect(Island.shared.presented.map(\.title) == ["ASCII"],
+                     "coalesced borrowing and restoration cannot suppress a later manual change")
         let reopened = reset()
         reopened.adoptASCIIInputSource()
         reopened.restoreSuspendedInputSource()
@@ -2649,6 +2760,9 @@ enum CommandBarDropletContract {
         suite.expect(shows.contains("panel.alphaValue = 1") && shows.contains("layer.add(appear, forKey: \"appear\")")
                      && !shows.contains("animator()"),
                      "the bar shows at once and fades in through Core Animation, not through main thread alpha steps")
+        let revealed = shows.components(separatedBy: "panel.alphaValue = 1").dropFirst().first ?? ""
+        suite.expect(revealed.contains("panel.makeKey()") && revealed.contains("self.focusField(in: panel)"),
+                     "the bar takes the keyboard again once the drop shows it, as the window bar does")
 
         let hurry = body(droplet, "func hurry() {")
         suite.expect(hurry.contains("guard falling, let fall, let reveal else { return }")

@@ -40,6 +40,9 @@ struct MixerApp: Identifiable, Equatable {
     /// absence doesn't read as a bug (issue #177), but never tapped — no
     /// slider, no routing, volume pinned at unity.
     var isBypassed: Bool = false
+    /// A manual universal switch found this process still playing elsewhere.
+    /// Keep its route at unity too, without saving a per-app device preference.
+    var universalOutputRouteUID: String? = nil
     var selectedOutputDeviceUID: String?
     var effectiveOutputDeviceUID: String?
     var outputDeviceUnavailable: Bool
@@ -62,7 +65,8 @@ struct MixerHiddenApp: Identifiable, Equatable {
 /// For every app the user turns down or routes to a specific output, a muted
 /// CoreAudio process tap removes the app's sound from the original output, and
 /// an aggregate device re-renders the tapped stream with the chosen gain. Apps
-/// on the system default output at 100% are left completely untouched.
+/// already following the system default at 100% are left untouched unless the
+/// user explicitly chooses a per-app output.
 final class AppVolumeMixer: ObservableObject {
     static let shared = AppVolumeMixer()
 
@@ -71,7 +75,7 @@ final class AppVolumeMixer: ObservableObject {
         return false
     }
 
-    /// Volumes run 0...2: 1.0 is 100% (untouched passthrough), up to 2.0 is a
+    /// Volumes run 0...2: 1.0 is 100% (unity gain), up to 2.0 is a
     /// 200% boost for sources that play too quietly.
     static let maxVolume: Double = 2.0
 
@@ -113,6 +117,15 @@ final class AppVolumeMixer: ObservableObject {
     /// process runs, never written to disk.
     private var sessionVolumes: [String: Double] = [:]
     private var sessionRoutes: [String: String] = [:]
+    /// A manual "all apps" choice only changes the system default. Kept as a
+    /// request, it moved apps still on another output to the default, which
+    /// also caught apps playing through an output of their own, such as a
+    /// call on a headset, and it outlived the session. The routing that reads
+    /// it stays dormant until it can tell those apps apart; an app that keeps
+    /// its old device can be given an output of its own, which holds at 100%.
+    private var universalOutputDeviceUID: String? {
+        nil
+    }
     private var lastAudibleVolume: [String: Double] = [:]
     private var listenerInstalled = false
     /// Device priority needs the output/default substrate without per-app
@@ -177,6 +190,11 @@ final class AppVolumeMixer: ObservableObject {
     private var queuedOutputSteps: [OutputStep] = []
     private var outputStepReadInFlight = false
     private var outputStepReadGeneration = 0
+    /// The level the last volume key asked for and the reading it stepped
+    /// from. An output with coarse steps rounds a step narrower than its own
+    /// back to that reading, and stepping from the reading again would hold
+    /// it there for good.
+    private var lastOutputStep: (device: AudioObjectID, lifetime: UUID, from: Double, to: Double)?
     private let outputControlLock = NSLock()
     private var outputControlLifetime = UUID()
     private let halQueue = DispatchQueue(label: "com.vorssaint.utils.mixer.hal", qos: .userInitiated)
@@ -396,6 +414,7 @@ final class AppVolumeMixer: ObservableObject {
         // Superseded keys are handled: replaying them would adjust the new output.
         pending?.completion(true)
         outputStepReadInFlight = false
+        lastOutputStep = nil
         settleQueuedOutputSteps(handled: true)
     }
 
@@ -458,11 +477,13 @@ final class AppVolumeMixer: ObservableObject {
     /// keep both because input IO can already be running when output changes.
     private static let runningListenerSelectors: [AudioObjectPropertySelector] = [
         kAudioProcessPropertyIsRunningOutput, kAudioProcessPropertyIsRunning,
+        kAudioProcessPropertyDevices,
     ]
 
     private static func runningAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector,
-                                   mScope: kAudioObjectPropertyScopeGlobal,
+                                   mScope: selector == kAudioProcessPropertyDevices
+                                       ? kAudioObjectPropertyScopeOutput : kAudioObjectPropertyScopeGlobal,
                                    mElement: kAudioObjectPropertyElementMain)
     }
 
@@ -508,6 +529,8 @@ final class AppVolumeMixer: ObservableObject {
         // read for those keys may still finish later, so invalidate its value.
         outputStepReadGeneration &+= 1
         settleQueuedOutputSteps(handled: true)
+        // A key records its own step again right after this.
+        lastOutputStep = nil
         outputControlRefreshGeneration &+= 1
         let previous = pendingOutputAdjustment
         var adjustment = previous ?? OutputAdjustment(device: device,
@@ -518,10 +541,13 @@ final class AppVolumeMixer: ObservableObject {
             adjustment.volume = value
             systemOutputVolume = value
             // Many outputs still play faintly at a scalar of zero; macOS mutes
-            // there, so do the same.
+            // there, so do the same. A level the percent labels show as 0%
+            // counts: a key steps from the level the output reports, so a
+            // coarse step from a hair above one step lands just above zero.
             if systemOutputMuted != nil, muted == nil {
-                adjustment.muted = value == 0
-                systemOutputMuted = value == 0
+                let mutes = MixerRoutingSupport.mutesOutput(atVolume: value)
+                adjustment.muted = mutes
+                systemOutputMuted = mutes
             }
         }
         if let muted { adjustment.muted = muted; systemOutputMuted = muted }
@@ -535,8 +561,10 @@ final class AppVolumeMixer: ObservableObject {
     /// level without notifying, and stepping from the stale reading left the
     /// island at 21% while the speakers played at 2%. Keys pressed while that
     /// read runs queue behind it, and keys during this app's own write carry on
-    /// from the level already requested. `level` receives the audible level
-    /// (0 while muted) and returns the one to set.
+    /// from the level already requested. So does the key after a step the
+    /// output rounded back to where it was, as one with 3 dB steps does with a
+    /// sixteenth. `level` receives the audible level (0 while muted) and
+    /// returns the one to set.
     func requestOutputStep(level: @escaping (Double) -> Double,
                            completion: @escaping (Bool) -> Void = { _ in }) {
         enqueueOutputKey(OutputStep(level: level, completion: completion),
@@ -600,11 +628,12 @@ final class AppVolumeMixer: ObservableObject {
                 // the default output lacks leaves its keys to the system; the
                 // others still apply.
                 let superseded = self.outputStepReadGeneration != readGeneration
-                if !superseded, !self.hasCurrentOutputAdjustment {
+                let fresh = !superseded && !self.hasCurrentOutputAdjustment
+                if fresh {
                     if self.systemOutputVolume != volume { self.systemOutputVolume = volume }
                     if self.systemOutputMuted != muted { self.systemOutputMuted = muted }
                 }
-                self.applyQueuedOutputSteps()
+                self.applyQueuedOutputSteps(reading: fresh ? volume : nil)
             }
         }
     }
@@ -615,17 +644,30 @@ final class AppVolumeMixer: ObservableObject {
         for step in steps { step.completion(handled) }
     }
 
-    private func applyQueuedOutputSteps() {
+    /// `reading` is the output's own level, when these keys have just read it.
+    private func applyQueuedOutputSteps(reading: Double? = nil) {
         let steps = queuedOutputSteps
         queuedOutputSteps.removeAll()
+        var reading = reading
         for step in steps {
             if let level = step.level {
                 guard let volume = systemOutputVolume else {
                     step.completion(false)
                     continue
                 }
-                requestOutputAdjustment(volume: level(systemOutputMuted == true ? 0 : volume),
-                                        completion: step.completion)
+                // Still at the level the last key stepped from, the output
+                // rounded that step back: go on from the level it asked for.
+                let start = reading.flatMap { roundedBackStepLevel($0, continuing: level) } ?? volume
+                let from = reading ?? lastOutputStep?.from ?? volume
+                let target = level(systemOutputMuted == true ? 0 : start)
+                requestOutputAdjustment(volume: target) { [weak self] applied in
+                    // A step the output refused carries nothing over.
+                    if !applied, self?.lastOutputStep?.to == target { self?.lastOutputStep = nil }
+                    step.completion(applied)
+                }
+                rememberOutputStep(from: from, to: target)
+                // Keys after the first in a burst continue from this one.
+                reading = nil
             } else {
                 guard let muted = systemOutputMuted else {
                     step.completion(false)
@@ -634,6 +676,23 @@ final class AppVolumeMixer: ObservableObject {
                 requestOutputAdjustment(muted: !muted, completion: step.completion)
             }
         }
+    }
+
+    /// The level the last key asked for, while the current output still
+    /// reads the level that key stepped from and `level` keeps going the same
+    /// way. A key back the other way steps from the reading, which the output
+    /// never left.
+    private func roundedBackStepLevel(_ reading: Double, continuing level: (Double) -> Double) -> Double? {
+        guard let step = lastOutputStep, step.device == outputControlListenerDevice,
+              step.lifetime == outputControlLock.withLock({ outputControlLifetime }),
+              abs(reading - step.from) < 0.0001,
+              (level(step.to) - step.to) * (step.to - step.from) > 0 else { return nil }
+        return step.to
+    }
+
+    private func rememberOutputStep(from: Double, to: Double) {
+        guard let device = outputControlListenerDevice else { return }
+        lastOutputStep = (device, outputControlLock.withLock { outputControlLifetime }, from, to)
     }
 
     private func isCurrentOutputAdjustment(_ adjustment: OutputAdjustment) -> Bool {
@@ -646,6 +705,11 @@ final class AppVolumeMixer: ObservableObject {
 
     private func applyOutputControls(volume: Double?, muted: Bool?) {
         guard !hasCurrentOutputAdjustment else { return }
+        // Read at any other level than the one the last key stepped from, that
+        // step landed or the output has moved since, so nothing carries over.
+        if let step = lastOutputStep, volume.map({ abs($0 - step.from) >= 0.0001 }) ?? true {
+            lastOutputStep = nil
+        }
         if systemOutputVolume != volume { systemOutputVolume = volume }
         if systemOutputMuted != muted { systemOutputMuted = muted }
     }
@@ -688,14 +752,19 @@ final class AppVolumeMixer: ObservableObject {
             scheduleListenerRefresh()
             return false
         }
+        // A direct change starts the next key from its own level.
+        lastOutputStep = nil
         if systemOutputVolume != clamped { systemOutputVolume = clamped }
-        if clamped > 0, systemOutputMuted == true { systemOutputMuted = false }
+        // The write above moved the mute switch with the level; the published
+        // state follows it on an output that has the switch.
+        let mutes = MixerRoutingSupport.mutesOutput(atVolume: clamped)
+        if systemOutputMuted != nil, systemOutputMuted != mutes { systemOutputMuted = mutes }
         return true
     }
 
-    /// 100% means bit-perfect passthrough (no tap). A value the UI would round to
-    /// 100% counts as unity, so dragging near 100% or tapping reset both restore
-    /// true passthrough; anything else (quieter or boosted) runs the gain engine.
+    /// A value the UI would round to 100% counts as unity. Without an output
+    /// route to enforce, that restores untouched passthrough; otherwise the
+    /// route keeps running at unity gain.
     private func isUnity(_ volume: Double) -> Bool { MixerRoutingSupport.isUnity(volume) }
 
     func setVolume(_ volume: Double, for app: MixerApp) {
@@ -725,6 +794,7 @@ final class AppVolumeMixer: ObservableObject {
         engineRecovery.clear(app.id)
         let sanitized = Defaults.sanitizedAppOutputDeviceUID(uid)
         persistOutputDeviceUID(sanitized, for: app)
+        refresh.discardInFlight()
         if let sanitized, MixerRoutingSupport.isAirPlaySentinel(sanitized), !AirPlayRouteManager.shared.isConnected {
             // After the menu that asked for it closes, so the list opens at the pointer.
             DispatchQueue.main.async { AirPlayRouteManager.shared.presentPicker() }
@@ -732,7 +802,7 @@ final class AppVolumeMixer: ObservableObject {
         if let index = apps.firstIndex(where: { $0.id == app.id }) {
             apps[index].selectedOutputDeviceUID = sanitized
             applyOutputRoute(to: &apps[index],
-                             savedOutputs: [app.id: sanitized].compactMapValues { $0 },
+                             savedOutputs: savedOutputDeviceUIDs(),
                              availableUIDs: MixerRoutingSupport.routableOutputUIDs(
                                 outputDevices.map(\.uid),
                                 airPlayConnected: AirPlayRouteManager.isSpeakerConnected),
@@ -742,6 +812,7 @@ final class AppVolumeMixer: ObservableObject {
             // sound never falls back to the old output in between.
             applyRouting(for: apps[index])
         }
+        refreshApps()
     }
 
     /// Choosing a speaker from an app's menu sends that app to AirPlay too,
@@ -823,39 +894,19 @@ final class AppVolumeMixer: ObservableObject {
             volumes: savedVolumes(),
             switchSucceeded: true)
         persistOutputDeviceUIDs(preferences.outputDeviceUIDs)
-
+        sessionRoutes.removeAll()
+        // A second shortcut press can precede the HAL snapshot. Cycle from
+        // the successful choice, while the per-app routes await that read.
         currentOutputDeviceUID = device.uid
-        outputDevices = outputDevices.map { outputDevice in
-            MixerOutputDevice(id: outputDevice.id,
-                              uid: outputDevice.uid,
-                              name: outputDevice.name,
-                              isDefault: outputDevice.uid == device.uid,
-                              isHeadphones: outputDevice.isHeadphones,
-                              canBeDefaultOutput: outputDevice.canBeDefaultOutput,
-                              canBeDefaultSystemOutput: outputDevice.canBeDefaultSystemOutput,
-                              priorityTier: outputDevice.priorityTier,
-                              audioObjectID: outputDevice.audioObjectID)
-        }
 
         // Builds started for the previous device can no longer be installed;
         // the engines themselves stay live until reconciliation has their
         // replacement running on the new device.
         builds.invalidateAll()
 
-        let availableUIDs = MixerRoutingSupport.routableOutputUIDs(
-            outputDevices.map(\.uid),
-            airPlayConnected: AirPlayRouteManager.isSpeakerConnected)
-        apps = apps.map { current in
-            var app = current
-            app.volume = storedVolume(for: app.identity, saved: preferences.volumes) ?? app.volume
-            applyOutputRoute(to: &app,
-                             savedOutputs: preferences.outputDeviceUIDs,
-                             availableUIDs: availableUIDs,
-                             defaultUID: device.uid)
-            return app
-        }
-        reconcileEngines(with: apps)
-        clearPermissionIfNoActiveAdjustments()
+        // Publish app routes and reconcile from the next HAL snapshot, which
+        // knows which apps actually followed the change. Dropping their old taps
+        // before that read can return a Wine game to the speakers at 100%.
         refreshApps()
         return true
     }
@@ -926,7 +977,7 @@ final class AppVolumeMixer: ObservableObject {
         }
         guard let targetOutputDeviceUID = app.effectiveOutputDeviceUID,
               appNeedsEngine(app) else {
-            // System default at 100% stays true passthrough.
+            // No volume or routing adjustment remains.
             discardEngine(for: app.id)
             clearPermissionIfNoActiveAdjustments()
             return
@@ -934,10 +985,10 @@ final class AppVolumeMixer: ObservableObject {
         if let engine = engines[app.id],
            engine.tappedObjects == app.audioObjects,
            engine.outputDeviceUID == targetOutputDeviceUID {
-            engine.gain = Float(app.volume)
+            engine.gain = MixerRoutingSupport.gain(forVolume: app.volume)
             return
         }
-        // Nothing is ever tapped on behalf of an app the user never adjusted.
+        // A tap needs a volume, per-app output or universal output request.
         guard rowMayBeTapped(app) else {
             discardEngine(for: app.id)
             clearPermissionIfNoActiveAdjustments()
@@ -969,7 +1020,7 @@ final class AppVolumeMixer: ObservableObject {
                 }
                 let engine = AirPlayGainEngine(appID: app.id,
                                                objects: app.audioObjects,
-                                               gain: Float(app.volume),
+                                               gain: MixerRoutingSupport.gain(forVolume: app.volume),
                                                clockDeviceUID: clockUID)
                 if engine == nil {
                     AirPlayRouteManager.shared.stopIfIdle()
@@ -987,7 +1038,7 @@ final class AppVolumeMixer: ObservableObject {
 
         buildQueue.async { [weak self] in
             let engine = TapGainEngine(objects: app.audioObjects,
-                                       gain: Float(app.volume),
+                                       gain: MixerRoutingSupport.gain(forVolume: app.volume),
                                        outputDeviceUID: targetOutputDeviceUID)
             DispatchQueue.main.async {
                 guard let self else {
@@ -1065,7 +1116,7 @@ final class AppVolumeMixer: ObservableObject {
             applyRouting(for: latestApp)
             return
         }
-        engine.gain = Float(latestApp.volume)
+        engine.gain = MixerRoutingSupport.gain(forVolume: latestApp.volume)
         let previous = engines.updateValue(engine, forKey: id)
         engineChangeAt[id] = CFAbsoluteTimeGetCurrent()
         // The fresh engine starts its render count over.
@@ -1077,8 +1128,8 @@ final class AppVolumeMixer: ObservableObject {
         reconcileEngines(with: apps)
     }
 
-    /// Stops and forgets a row's engine. Used where silence is the intent
-    /// (back to 100% on the default output, row gone), never for a rebuild.
+    /// Stops and forgets a row's engine when its adjustment no longer applies
+    /// or the row went away, never for a rebuild.
     private func discardEngine(for id: String) {
         engines.removeValue(forKey: id)?.stop()
         engineChangeAt.removeValue(forKey: id)
@@ -1091,15 +1142,20 @@ final class AppVolumeMixer: ObservableObject {
         MixerRoutingSupport.rowMayBeTapped(
             savedVolume: storedVolume(for: app.identity, saved: savedVolumes()),
             savedRouteUID: storedRoute(for: app.identity, saved: savedOutputDeviceUIDs()),
-            defaultOutputDeviceUID: currentOutputDeviceUID)
+            defaultOutputDeviceUID: app.effectiveOutputDeviceUID,
+            universalOutputRouteUID: app.universalOutputRouteUID)
     }
 
     private func appNeedsEngine(_ app: MixerApp) -> Bool {
+        // A universal route and its effective output come from one snapshot.
+        // The picker may already show the next successful choice, but that
+        // must not dismantle this route before its replacement is ready.
         MixerRoutingSupport.requiresEngine(hasAudioObjects: !app.audioObjects.isEmpty,
                                            volume: app.volume,
                                            selectedOutputDeviceUID: app.selectedOutputDeviceUID,
                                            targetOutputDeviceUID: app.effectiveOutputDeviceUID,
-                                           defaultOutputDeviceUID: currentOutputDeviceUID)
+                                           defaultOutputDeviceUID: app.effectiveOutputDeviceUID,
+                                           universalOutputRouteUID: app.universalOutputRouteUID)
     }
 
     private func applyOutputRoute(to app: inout MixerApp,
@@ -1132,6 +1188,8 @@ final class AppVolumeMixer: ObservableObject {
         let savedOutputs: [String: String]
         let sessionVolumes: [String: Double]
         let sessionRoutes: [String: String]
+        let universalOutputDeviceUID: String?
+        let previouslyRoutedObjects: [String: [AudioObjectID]]
         let showFinder: Bool
         /// Persistence ids the list must leave out: the apps the user hid,
         /// plus the Finder while its toggle is off (issue #300).
@@ -1165,6 +1223,7 @@ final class AppVolumeMixer: ObservableObject {
         // now would read against state the first has not published yet. The
         // request is remembered and runs as soon as that one lands.
         guard let generation = refresh.begin() else { return }
+        let universalUID = universalOutputDeviceUID
         let request = RefreshRequest(
             includeApps: processMonitoringEnabled,
             previousDefaultUID: currentOutputDeviceUID,
@@ -1179,6 +1238,16 @@ final class AppVolumeMixer: ObservableObject {
             savedOutputs: savedOutputDeviceUIDs(),
             sessionVolumes: sessionVolumes,
             sessionRoutes: sessionRoutes,
+            universalOutputDeviceUID: universalUID,
+            previouslyRoutedObjects: Dictionary(uniqueKeysWithValues: apps.compactMap { app in
+                // A volume tap can already be muting the original output
+                // when "all apps" is chosen. An empty device read must not
+                // discard that established path as the gain returns to unity.
+                guard universalUID != nil,
+                      app.universalOutputRouteUID == universalUID
+                        || engines[app.id]?.tappedObjects == app.audioObjects else { return nil }
+                return (app.id, app.audioObjects)
+            }),
             showFinder: UserDefaults.standard.bool(forKey: DefaultsKey.mixerShowFinder),
             hiddenRowIDs: MixerRoutingSupport.hiddenRowIDs(
                 hiddenApps: savedHiddenApps(),
@@ -1316,6 +1385,13 @@ final class AppVolumeMixer: ObservableObject {
         let saved = request.savedVolumes
         let savedOutputs = request.savedOutputs
         let showFinder = request.showFinder
+        let followsUniversalOutput = request.universalOutputDeviceUID != nil
+            && request.universalOutputDeviceUID == defaultUID
+        let defaultDevices = followsUniversalOutput ? defaultDevice.map {
+            MixerRoutingSupport.outputDevices(of: $0.audioObjectID,
+                                               subDeviceUIDs: subDeviceUIDs(of:),
+                                               deviceForUID: deviceID(forUID:))
+        } ?? [] : Set<AudioObjectID>()
         var groups: [pid_t: [AudioObjectID]] = [:]
         var playing: Set<pid_t> = []
         var bypassed: Set<pid_t> = []
@@ -1419,6 +1495,11 @@ final class AppVolumeMixer: ObservableObject {
                                                      otherName: $1.name, otherID: $1.id)
         }
         next = coalescingAppsWithDuplicateIDs(next)
+        next = applyingUniversalOutputRoute(to: next,
+                                            requestedUID: request.universalOutputDeviceUID,
+                                            defaultUID: defaultUID,
+                                            defaultDevices: defaultDevices,
+                                            previouslyRoutedObjects: request.previouslyRoutedObjects)
 
         return RefreshSnapshot(defaultUID: defaultUID,
                                systemSoundUID: systemSoundUID,
@@ -1429,6 +1510,36 @@ final class AppVolumeMixer: ObservableObject {
                                apps: next,
                                processObjects: processObjects,
                                lowered: lowered)
+    }
+
+    /// Runs in the HAL snapshot after rows with the same identity have been
+    /// combined, so all of an app's audio objects share one routing decision.
+    private static func applyingUniversalOutputRoute(to apps: [MixerApp],
+                                                      requestedUID: String?,
+                                                      defaultUID: String?,
+                                                      defaultDevices: Set<AudioObjectID>,
+                                                      previouslyRoutedObjects: [String: [AudioObjectID]]) -> [MixerApp] {
+        apps.map { current in
+            var app = current
+            app.universalOutputRouteUID = nil
+            guard let requestedUID, requestedUID == defaultUID,
+                  !app.isBypassed, app.selectedOutputDeviceUID == nil else { return app }
+            let devices = app.audioObjects.reduce(into: Set<AudioObjectID>()) { devices, object in
+                devices.formUnion(objectList(object, kAudioProcessPropertyDevices,
+                                             scope: kAudioObjectPropertyScopeOutput))
+            }
+            if MixerRoutingSupport.requiresUniversalOutputRouting(
+                requestedUID: requestedUID,
+                defaultUID: defaultUID,
+                selectedUID: app.selectedOutputDeviceUID,
+                audioObjects: app.audioObjects,
+                previouslyRoutedObjects: previouslyRoutedObjects[app.id],
+                processDevices: devices,
+                defaultDevices: defaultDevices) {
+                app.universalOutputRouteUID = defaultUID
+            }
+            return app
+        }
     }
 
     private static func coalescingAppsWithDuplicateIDs(_ apps: [MixerApp]) -> [MixerApp] {
@@ -1450,6 +1561,8 @@ final class AppVolumeMixer: ObservableObject {
                                      name: existing.name,
                                      audioObjects: audioObjects,
                                      isPlaying: existing.isPlaying || app.isPlaying,
+                                     isBypassed: existing.isBypassed || app.isBypassed,
+                                     universalOutputRouteUID: existing.universalOutputRouteUID ?? app.universalOutputRouteUID,
                                      selectedOutputDeviceUID: existing.selectedOutputDeviceUID,
                                      effectiveOutputDeviceUID: existing.effectiveOutputDeviceUID,
                                      outputDeviceUnavailable: existing.outputDeviceUnavailable,
@@ -1466,6 +1579,9 @@ final class AppVolumeMixer: ObservableObject {
         let uid: String
         let previousVolume: Float32
         let appliedVolume: Float32
+        /// The lowering also turned the output's mute on (silence was chosen),
+        /// so handing the speakers back turns it off again.
+        var mutedByLowering = false
     }
 
     private struct LoweredOutputState {
@@ -1511,18 +1627,24 @@ final class AppVolumeMixer: ObservableObject {
         let previousVolume = outputVolume(for: nextDefault.audioObjectID)
         if setOutputVolume(volume, for: nextDefault.audioObjectID) {
             state.lastAutomaticLoweredOutputUID = nextDefaultUID
-            if let previousVolume, previousVolume > volume {
+            let muted = MixerRoutingSupport.shouldMuteOutputLoweredForDisconnect(
+                lowerToPercent: lowerToPercent,
+                currentlyMuted: outputMuted(for: nextDefault.audioObjectID))
+                && setOutputMuted(true, for: nextDefault.audioObjectID)
+            if let previousVolume, previousVolume > volume || muted {
                 state.loweredOutput = LoweredOutput(uid: nextDefaultUID,
                                                     previousVolume: previousVolume,
-                                                    appliedVolume: volume)
+                                                    appliedVolume: volume,
+                                                    mutedByLowering: muted)
             }
         }
         return state
     }
 
-    /// Puts back the volume this feature lowered, as long as it is still the
-    /// value the app set: anything else means it was changed since, and that
-    /// choice wins. Returns what is left to restore later.
+    /// Puts back the volume this feature lowered, and the mute it set at zero,
+    /// as long as the volume is still the value the app set: anything else
+    /// means it was changed since, and that choice wins. Returns what is left
+    /// to restore later.
     private static func restoringLoweredOutputVolume(_ lowered: LoweredOutput?,
                                                      in devices: [MixerOutputDevice]) -> LoweredOutput? {
         guard let lowered else { return nil }
@@ -1534,6 +1656,11 @@ final class AppVolumeMixer: ObservableObject {
             appliedVolume: Double(lowered.appliedVolume),
             currentVolume: outputVolume(for: device.audioObjectID).map(Double.init)) else { return nil }
         _ = setOutputVolume(lowered.previousVolume, for: device.audioObjectID)
+        // A mute switched off since then was someone's choice, and one this
+        // feature did not set was never its to undo.
+        if lowered.mutedByLowering, outputMuted(for: device.audioObjectID) == true {
+            setOutputMuted(false, for: device.audioObjectID)
+        }
         return nil
     }
 
@@ -1642,7 +1769,7 @@ final class AppVolumeMixer: ObservableObject {
 
             engineChangeAt[id] = now
             guard appNeedsEngine(app) else {
-                // Back to 100% on the default output: passthrough is the point.
+                // No remaining volume or output adjustment needs a tap.
                 discardEngine(for: id)
                 continue
             }
@@ -2125,12 +2252,14 @@ final class AppVolumeMixer: ObservableObject {
     @discardableResult
     static func setSystemOutputVolume(_ volume: Double) -> Bool {
         guard let device = defaultOutputDeviceID() else { return false }
-        let clamped = Float32(min(max(volume, 0), 1))
-        let applied = setOutputVolume(clamped, for: device)
+        let level = min(max(volume, 0), 1)
+        let applied = setOutputVolume(Float32(level), for: device)
         // Mute is a separate switch from the level, so asking for a volume
-        // while the Mac is muted would set a number nobody can hear. Asking
-        // for sound means asking for sound, which is what the volume keys do.
-        if clamped > 0 { setOutputMuted(false, for: device) }
+        // while the Mac is muted would set a number nobody can hear, and 0%
+        // without the switch still plays on some outputs. The switch follows
+        // the level, as the system's own volume keys do; an output without
+        // a settable mute element takes the level alone.
+        setOutputMuted(MixerRoutingSupport.mutesOutput(atVolume: level), for: device)
         return applied
     }
 
