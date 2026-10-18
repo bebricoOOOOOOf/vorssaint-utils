@@ -891,6 +891,20 @@ MUTATIONS = [
      "        setOutputMuted(MixerRoutingSupport.mutesOutput(atVolume: level), for: device)\n",
      "        if level > 0 { setOutputMuted(false, for: device) }\n",
      "the command bar's volume 0 mutes the output"),
+    ("the reorder tooltip covers a row's controls again", "mixer",
+     "Sources/Vorssaint/UI/MenuPanel/MixerSection.swift",
+     "                    }))\n        }\n    }\n\n    private func updateArrangement",
+     "                    }))\n                .help(FeatureStrings.mixer(l10n.language).arrange)\n"
+     "        }\n    }\n\n    private func updateArrangement",
+     "the mixer row does not replace its controls' tooltips with the reorder hint"),
+    ("the app icon loses its reorder hint", "mixer",
+     "Sources/Vorssaint/UI/MenuPanel/MixerSection.swift",
+     "\n            .help(arrangementStrings.arrange)\n", "\n",
+     "the reorder hint remains on both the app icon and name"),
+    ("the app name loses its reorder hint", "mixer",
+     "Sources/Vorssaint/UI/MenuPanel/MixerSection.swift",
+     "                        .help(arrangementStrings.arrange)\n", "",
+     "the reorder hint remains on both the app icon and name"),
 ]
 
 
